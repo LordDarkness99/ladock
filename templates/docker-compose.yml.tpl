@@ -1,10 +1,11 @@
-version: "3.8"
-
 services:
   app___PROJECT__:
     build:
       context: .
       dockerfile: .docker/Dockerfile
+      args:
+        PHP_VERSION: __PHP_VERSION__
+        COMPOSER_VERSION: __COMPOSER_VERSION__
     container_name: __PROJECT___app
     restart: unless-stopped
     working_dir: /var/www
@@ -33,6 +34,7 @@ services:
     image: mysql:8.0
     container_name: __PROJECT___db
     restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
     environment:
       MYSQL_DATABASE: __DB_NAME__
       MYSQL_USER: __DB_USER__

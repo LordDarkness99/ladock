@@ -1,27 +1,38 @@
-FROM php:8.4-fpm
+# ============================================================
+# Deklarasikan ARG di awal (global) untuk semua stage
+# ============================================================
+ARG PHP_VERSION=8.4
+ARG COMPOSER_VERSION=2
 
-# System deps + PHP extensions yang dibutuhkan Laravel
-RUN apt-get update && apt-get install -y \
+# Stage untuk Composer (pilih versi)
+FROM composer:${COMPOSER_VERSION} AS composer
+
+# Stage utama PHP
+FROM php:${PHP_VERSION}-fpm
+
+# --- Ganti sources.list: gunakan repo utama, tanpa security (hindari 404) ---
+RUN echo "deb http://deb.debian.org/debian bullseye main contrib non-free" > /etc/apt/sources.list && \
+    echo "deb http://deb.debian.org/debian bullseye-updates main contrib non-free" >> /etc/apt/sources.list
+
+# System deps + PHP extensions (hanya yang dibutuhkan Laravel)
+RUN apt-get update -o Acquire::Check-Valid-Until=false && apt-get install -y --no-install-recommends --fix-missing \
         git curl zip unzip \
         libpng-dev libonig-dev libxml2-dev libzip-dev \
-        libicu-dev \ 
-        libpq-dev \
-        default-mysql-client \
+        libicu-dev \
     && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip intl \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Composer
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+# Copy Composer dari stage composer
+COPY --from=composer /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www
 
 COPY . /var/www
 
-# --- FIX 3: Berikan izin yang benar untuk semua folder yang diperlukan ---
-RUN mkdir -p storage bootstrap/cache \
-    && chown -R www-data:www-data storage bootstrap/cache \
+RUN mkdir -p storage/bootstrap/cache \
+    && chown -R www-data:www-data storage/bootstrap/cache \
     && chown -R www-data:www-data public \
-    && chmod -R 755 storage bootstrap/cache public
+    && chmod -R 755 storage/bootstrap/cache public
 
 EXPOSE 9000
 CMD ["php-fpm"]
