@@ -1,0 +1,9 @@
+./deploy.sh path port port
+./destroy.sh path port port
+example:
+./deploy.sh /home/nizar/Documents/myCode/maDiskominfo/ujicoba/servismobil-webapi-laravel8/
+./destroy.sh /home/nizar/Documents/myCode/maDiskominfo/ujicoba/CampusCare/ 8081 3308
+
+mysql -h 127.0.0.1 -P 3307 -u travel_agency_admin__user -p
+
+

@@ -7,19 +7,21 @@ ARG COMPOSER_VERSION=2
 # Stage untuk Composer (pilih versi)
 FROM composer:${COMPOSER_VERSION} AS composer
 
-# Stage utama PHP
-FROM php:${PHP_VERSION}-fpm
+# Stage utama PHP + Apache
+FROM php:${PHP_VERSION}-apache
 
 # --- Ganti sources.list: gunakan repo utama, tanpa security (hindari 404) ---
 RUN echo "deb http://deb.debian.org/debian bullseye main contrib non-free" > /etc/apt/sources.list && \
     echo "deb http://deb.debian.org/debian bullseye-updates main contrib non-free" >> /etc/apt/sources.list
 
-# System deps + PHP extensions (hanya yang dibutuhkan Laravel)
+# System deps + PHP extensions (hanya yang dibutuhkan Laravel) + enable mod_rewrite
 RUN apt-get update -o Acquire::Check-Valid-Until=false && apt-get install -y --no-install-recommends --fix-missing \
         git curl zip unzip \
         libpng-dev libonig-dev libxml2-dev libzip-dev \
         libicu-dev \
     && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip intl \
+    && a2enmod rewrite \
+    && echo "ServerName localhost" >> /etc/apache2/apache2.conf \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy Composer dari stage composer
@@ -34,5 +36,9 @@ RUN mkdir -p storage/bootstrap/cache \
     && chown -R www-data:www-data public \
     && chmod -R 755 storage/bootstrap/cache public
 
-EXPOSE 9000
-CMD ["php-fpm"]
+# Virtual host (DocumentRoot -> public/, AllowOverride All untuk .htaccess Laravel)
+# di-mount dari .docker/apache-vhost.conf lewat docker-compose, jadi tidak perlu
+# di-bake di sini supaya gampang diubah tanpa rebuild image.
+
+EXPOSE 80
+CMD ["apache2-foreground"]
