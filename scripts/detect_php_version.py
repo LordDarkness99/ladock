@@ -60,4 +60,23 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print(DEFAULT)
         sys.exit(0)
-    print(detect(sys.argv[1]))
+
+    composer_path = sys.argv[1]
+    result = detect(composer_path).strip()
+
+    # Jaga-jaga: kalau karena alasan apapun hasilnya bukan versi yang valid, paksa fallback.
+    if result not in SUPPORTED:
+        print(f"[detect_php_version] Hasil deteksi '{result}' tidak valid, fallback ke {DEFAULT}", file=sys.stderr)
+        result = DEFAULT
+
+    # Debug ke stderr (tidak ikut tertangkap oleh $(...) di bash) supaya kelihatan constraint aslinya
+    try:
+        with open(composer_path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        constraint = (raw.get("require") or {}).get("php") or (raw.get("require-dev") or {}).get("php")
+        print(f"[detect_php_version] composer.json php constraint: {constraint!r} -> dipilih PHP {result}", file=sys.stderr)
+    except Exception:
+        print(f"[detect_php_version] composer.json tidak terbaca / tidak ada constraint php -> fallback PHP {result}", file=sys.stderr)
+
+    # Baris INI SAJA yang boleh ke stdout, supaya aman ditangkap $(...) di bash
+    print(result)

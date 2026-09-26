@@ -15,14 +15,19 @@ RUN echo "deb http://deb.debian.org/debian bullseye main contrib non-free" > /et
     echo "deb http://deb.debian.org/debian bullseye-updates main contrib non-free" >> /etc/apt/sources.list
 
 # System deps + PHP extensions (hanya yang dibutuhkan Laravel) + enable mod_rewrite
-RUN apt-get update -o Acquire::Check-Valid-Until=false && apt-get install -y --no-install-recommends --fix-missing \
-        git curl zip unzip \
-        libpng-dev libonig-dev libxml2-dev libzip-dev \
-        libicu-dev \
-    && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip intl \
-    && a2enmod rewrite \
-    && echo "ServerName localhost" >> /etc/apache2/apache2.conf \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN apt-get update -o Acquire::Check-Valid-Until=false \
+      -o Acquire::http::Timeout=60 \
+      -o Acquire::Retries=5 \
+ && apt-get install -y --no-install-recommends --fix-missing \
+      -o Acquire::http::Timeout=60 \
+      -o Acquire::Retries=5 \
+      git curl zip unzip \
+      libpng-dev libonig-dev libxml2-dev libzip-dev \
+      libicu-dev \
+ && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip intl \
+ && a2enmod rewrite \
+ && echo "ServerName localhost" >> /etc/apache2/apache2.conf \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy Composer dari stage composer
 COPY --from=composer /usr/bin/composer /usr/bin/composer

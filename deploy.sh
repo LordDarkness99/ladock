@@ -2,18 +2,22 @@
 set -euo pipefail
 
 # ============================================================
-#  Laravel Docker Auto-Deploy (Apache + Auto-Detect PHP + Auto-Import DB + Seeder)
+#  Laravel Docker Auto-Deploy (Apache + Auto-Detect PHP + Auto-Import DB)
 #  Usage: ./deploy.sh /path/to/laravel-project [http_port] [db_port] [php_version] [flags]
+#     atau (deploy dari backup cPanel):
+#         ./deploy.sh --cpmove=/path/cpmove-xxx.tar.gz [http_port] [db_port] [php_version] [flags]
 #
 #  Flags (opsional, bisa diletakkan di mana saja):
+#    --cpmove=/path/cpmove.tar.gz  Extract project Laravel + dump DB dari backup cPanel,
+#                                  lalu pakai hasilnya sebagai project (tidak perlu project_path lagi)
+#    --cpmove-dest=/path/output    Folder tujuan hasil extract cpmove (opsional, default otomatis)
 #    --dump=/path/file.sql   Path eksplisit file dump database yang mau diimport
 #    --force-import          Paksa import dump walau ini bukan deploy pertama
 #    --skip-import           Jangan pernah import dump (walau deploy pertama)
-#    --force-seed            Paksa jalankan php artisan db:seed walau redeploy
-#    --skip-seed             Jangan jalankan seeder sama sekali
 #
 #  Kalau php_version tidak diberikan, akan dideteksi dari composer.json.
-#  Kalau project_path tidak diberikan, akan dicari otomatis di folder saat ini.
+#  Kalau project_path tidak diberikan (dan --cpmove tidak dipakai), akan dicari
+#  otomatis di folder saat ini.
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,41 +29,82 @@ ARGS=()
 DUMP_FILE=""
 FORCE_IMPORT=0
 SKIP_IMPORT=0
-FORCE_SEED=0
-SKIP_SEED=0
+CPMOVE_FILE=""
+CPMOVE_DEST=""
 for arg in "$@"; do
   case "$arg" in
-    --dump=*)       DUMP_FILE="${arg#--dump=}" ;;
-    --force-import) FORCE_IMPORT=1 ;;
-    --skip-import)  SKIP_IMPORT=1 ;;
-    --force-seed)   FORCE_SEED=1 ;;
-    --skip-seed)    SKIP_SEED=1 ;;
+    --dump=*)        DUMP_FILE="${arg#--dump=}" ;;
+    --force-import)  FORCE_IMPORT=1 ;;
+    --skip-import)   SKIP_IMPORT=1 ;;
+    --cpmove=*)      CPMOVE_FILE="${arg#--cpmove=}" ;;
+    --cpmove-dest=*) CPMOVE_DEST="${arg#--cpmove-dest=}" ;;
     *) ARGS+=("$arg") ;;
   esac
 done
 
-PROJECT_PATH="${ARGS[0]:-}"
-HTTP_PORT="${ARGS[1]:-8080}"
-DB_PORT="${ARGS[2]:-3307}"
-PHP_VERSION_PARAM="${ARGS[3]:-}"
+# Kalau --cpmove dipakai, project_path TIDAK diisi lewat argumen posisional lagi
+# (karena didapat dari hasil extract arsip), jadi posisi argumen bergeser satu.
+if [[ -n "$CPMOVE_FILE" ]]; then
+  PROJECT_PATH=""
+  HTTP_PORT="${ARGS[0]:-8080}"
+  DB_PORT="${ARGS[1]:-3307}"
+  PHP_VERSION_PARAM="${ARGS[2]:-}"
+else
+  PROJECT_PATH="${ARGS[0]:-}"
+  HTTP_PORT="${ARGS[1]:-8080}"
+  DB_PORT="${ARGS[2]:-3307}"
+  PHP_VERSION_PARAM="${ARGS[3]:-}"
+fi
 
 usage() {
   echo "Usage: $0 /path/to/laravel-project [http_port] [db_port] [php_version] [flags]"
+  echo "   atau: $0 --cpmove=/path/cpmove-xxx.tar.gz [http_port] [db_port] [php_version] [flags]"
   echo "  php_version : 5.6, 7.0, 7.1, 7.2, 7.3, 7.4, 8.0, 8.1, 8.2, 8.3, 8.4 (default auto-detect)"
-  echo "  --dump=FILE    : path eksplisit file dump .sql yang mau diimport"
+  echo "  --cpmove=FILE      : extract project + dump DB dari backup cPanel (cpmove-*.tar.gz)"
+  echo "  --cpmove-dest=DIR  : folder tujuan hasil extract cpmove (opsional)"
+  echo "  --dump=FILE : path eksplisit file dump .sql yang mau diimport"
   echo "  --force-import : paksa import dump walau redeploy"
   echo "  --skip-import  : jangan import dump sama sekali"
-  echo "  --force-seed   : paksa jalankan php artisan db:seed walau redeploy"
-  echo "  --skip-seed    : jangan jalankan seeder sama sekali"
 }
 
-# --- python3 wajib ada (dipakai untuk deteksi PHP, cari project, import DB) ---
+# --- python3 wajib ada (dipakai untuk deteksi PHP, cari project, import DB, extract cpmove) ---
 if ! command -v python3 >/dev/null 2>&1; then
   echo "python3 tidak ditemukan. Install python3 terlebih dahulu (dipakai untuk deteksi PHP version, cari project, dan import database)."
   exit 1
 fi
 
-# --- Kalau project path tidak diisi, coba cari otomatis pakai python ---
+# --- Kalau --cpmove dipakai, extract dulu & jadikan hasilnya PROJECT_PATH ---
+if [[ -n "$CPMOVE_FILE" ]]; then
+  if [[ ! -f "$CPMOVE_FILE" ]]; then
+    echo "File cpmove tidak ditemukan: $CPMOVE_FILE"
+    exit 1
+  fi
+  CPMOVE_FILE="$(cd "$(dirname "$CPMOVE_FILE")" && pwd)/$(basename "$CPMOVE_FILE")"
+
+  if [[ -z "$CPMOVE_DEST" ]]; then
+    CPMOVE_BASE="$(basename "$CPMOVE_FILE")"
+    CPMOVE_BASE="${CPMOVE_BASE%.tar.gz}"
+    CPMOVE_BASE="${CPMOVE_BASE%.tgz}"
+    CPMOVE_BASE="${CPMOVE_BASE#cpmove-}"
+    CPMOVE_DEST="$(dirname "$CPMOVE_FILE")/${CPMOVE_BASE}_laravel"
+  fi
+
+  if [[ -d "$CPMOVE_DEST" && -n "$(ls -A "$CPMOVE_DEST" 2>/dev/null)" ]]; then
+    echo "-> Folder hasil extract cpmove sudah ada & tidak kosong, pakai yang ada: $CPMOVE_DEST"
+    PROJECT_PATH="$CPMOVE_DEST"
+  else
+    echo "-> Mengekstrak project Laravel + dump DB dari arsip cpmove..."
+    PROJECT_PATH="$(python3 "$SCRIPTS_DIR/extract_cpmove.py" "$CPMOVE_FILE" "$CPMOVE_DEST")"
+  fi
+
+  if [[ -z "$PROJECT_PATH" || ! -d "$PROJECT_PATH" || ! -f "$PROJECT_PATH/artisan" ]]; then
+    echo "Gagal mengekstrak/menemukan project Laravel yang valid dari arsip cpmove."
+    exit 1
+  fi
+  echo "-> Project hasil extract cpmove: $PROJECT_PATH"
+fi
+
+# --- Kalau project path tidak diisi (dan bukan dari --cpmove), coba cari otomatis pakai python ---
 if [[ -z "$PROJECT_PATH" ]]; then
   echo "-> Project path tidak diisi, mencari project Laravel di folder ini ($(pwd))..."
   mapfile -t FOUND < <(python3 "$SCRIPTS_DIR/find_laravel_projects.py" "$(pwd)")
@@ -248,47 +293,68 @@ fi
 
 if [[ $SHOULD_IMPORT -eq 1 ]]; then
   echo "-> Mencari & mengimpor dump database (.sql) jika ada..."
-  python3 "$SCRIPTS_DIR/db_import.py" \
-    --project-path "$PROJECT_PATH" \
-    --project-name "$PROJECT_NAME" \
-    --compose-file "$COMPOSE_FILE" \
-    --db-name "$DB_NAME" \
-    --db-root-pass "$DB_ROOT_PASS" \
-    --dc "$DC" \
-    ${DUMP_FILE:+--dump "$DUMP_FILE"}
+  if [[ -n "$DUMP_FILE" ]]; then
+    python3 "$SCRIPTS_DIR/db_import.py" \
+      --project-path "$PROJECT_PATH" \
+      --project-name "$PROJECT_NAME" \
+      --compose-file "$COMPOSE_FILE" \
+      --db-name "$DB_NAME" \
+      --db-root-pass "$DB_ROOT_PASS" \
+      --dc "$DC" \
+      --dump "$DUMP_FILE"
+  else
+    python3 "$SCRIPTS_DIR/db_import.py" \
+      --project-path "$PROJECT_PATH" \
+      --project-name "$PROJECT_NAME" \
+      --compose-file "$COMPOSE_FILE" \
+      --db-name "$DB_NAME" \
+      --db-root-pass "$DB_ROOT_PASS" \
+      --dc "$DC"
+  fi
 else
   echo "-> Lewati import dump (bukan deploy pertama; pakai --force-import kalau mau paksa import ulang)."
 fi
 
-# --- Tentukan apakah seeder perlu dijalankan ---
-# Default: hanya jalan otomatis di deploy PERTAMA kali (biar redeploy tidak
-# menimpa data yang sudah dipakai/berubah), kecuali --force-seed dipakai.
-SHOULD_SEED=0
-if [[ $SKIP_SEED -eq 0 ]]; then
-  if [[ $FRESH_DEPLOY -eq 1 || $FORCE_SEED -eq 1 ]]; then
-    SHOULD_SEED=1
-  fi
-fi
-
-if [[ $SHOULD_SEED -eq 1 ]]; then
-  SEED_CMD="php artisan db:seed --force || true"
-  echo "-> Seeder akan dijalankan setelah migrate."
-else
-  SEED_CMD="echo '-> Lewati db:seed (bukan deploy pertama; pakai --force-seed kalau mau paksa seed ulang).'"
-fi
-
 # --- Setup Laravel (dengan fallback composer update) ---
-echo "-> Menjalankan composer install, migrate & seed di dalam container..."
+# Catatan penting: SEBELUM key:generate, kita hapus dulu semua file cache &
+# session yang terbawa dari arsip cPanel. File-file itu menyimpan data
+# ter-serialisasi (termasuk closure dari config/route cache) yang bertanda
+# tangan dengan APP_KEY LAMA. Kalau dibiarkan, setelah key:generate Laravel
+# akan coba meng-unserialize-nya dan gagal dengan
+# "Opis\Closure\SecurityException".
+echo "-> Menjalankan composer install & migrate di dalam container..."
 $DC -f "$COMPOSE_FILE" -p "$PROJECT_NAME" exec -T "app_${PROJECT_NAME}" bash -lc "
-  # Coba composer install, jika gagal karena PHP version, jalankan composer update
+  set -e
+
+  # 1) Composer install (fallback ke update kalau dependency tidak kompatibel)
   if composer install --no-interaction --prefer-dist --optimize-autoloader 2>&1 | tee /tmp/composer_output | grep -q 'does not satisfy'; then
     echo '⚠️  Dependencies tidak kompatibel dengan PHP $PHP_VERSION, menjalankan composer update...'
     composer update --no-interaction --prefer-dist --optimize-autoloader
   fi
-  php artisan key:generate --force || true
+
+  # 2) Bersihkan SEMUA cache lama SEBELUM generate key baru.
+  #    Ini menghilangkan config/route cache & session dari arsip cPanel yang
+  #    ditandatangani dengan APP_KEY lama (sumber Opis\\Closure\\SecurityException).
+  rm -f bootstrap/cache/*.php 2>/dev/null || true
+  rm -f storage/framework/sessions/* 2>/dev/null || true
+  rm -f storage/framework/views/*.php 2>/dev/null || true
   php artisan config:clear || true
+  php artisan route:clear  || true
+  php artisan view:clear   || true
+  php artisan cache:clear  || true
+
+  # 3) Generate APP_KEY baru.
+  php artisan key:generate --force || true
+
+  # 4) Bersihkan sekali lagi SETELAH key baru, karena beberapa paket
+  #    menulis config cache di key:generate.
+  rm -f bootstrap/cache/*.php 2>/dev/null || true
+  php artisan config:clear || true
+  php artisan route:clear  || true
+
+  # 5) Migrate (data yang sudah diimport tetap aman, migrate hanya jalankan
+  #    migration yang belum ada) & symlink storage.
   php artisan migrate --force || true
-  $SEED_CMD
   php artisan storage:link || true
 "
 
@@ -300,7 +366,6 @@ echo " MySQL       : localhost:$DB_PORT"
 echo "   DB Name   : $DB_NAME"
 echo "   DB User   : $DB_USER"
 echo "   DB Pass   : $DB_PASS"
-echo "   DB Root   : $DB_ROOT_PASS"
 echo " PHP Versi   : $PHP_VERSION"
 echo " Kredensial tersimpan di: $CREDS_FILE"
 echo "=============================================="
