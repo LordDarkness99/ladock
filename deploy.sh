@@ -255,6 +255,25 @@ set_env "DB_DATABASE" "$DB_NAME"
 set_env "DB_USERNAME" "$DB_USER"
 set_env "DB_PASSWORD" "$DB_PASS"
 
+# --- Normalisasi URL & nonaktifkan paksaan HTTPS di local docker ---
+echo "-> Menyesuaikan konfigurasi URL & menonaktifkan paksaan HTTPS di .env..."
+set_env "APP_URL" "http://localhost:${HTTP_PORT}"
+if grep -q "^ASSET_URL=" .env; then
+  set_env "ASSET_URL" "http://localhost:${HTTP_PORT}"
+fi
+if grep -q "^ADMIN_HTTPS=" .env; then
+  set_env "ADMIN_HTTPS" "false"
+fi
+if grep -q "^FORCE_HTTPS=" .env; then
+  set_env "FORCE_HTTPS" "false"
+fi
+if grep -q "^LARAVEL_ADMIN_HTTPS=" .env; then
+  set_env "LARAVEL_ADMIN_HTTPS" "false"
+fi
+if grep -q "^SESSION_SECURE_COOKIE=" .env; then
+  set_env "SESSION_SECURE_COOKIE" "false"
+fi
+
 # --- Bersihkan container lama ---
 echo "-> Membersihkan container lama project ini (jika ada)..."
 $DC -f "$COMPOSE_FILE" -p "$PROJECT_NAME" down --remove-orphans >/dev/null 2>&1 || true

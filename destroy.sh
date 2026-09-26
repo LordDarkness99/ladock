@@ -31,6 +31,7 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
 fi
 
 echo "-> Menghentikan & menghapus container + volume DB project '$PROJECT_NAME'..."
+cd "$PROJECT_PATH"
 $DC -f "$COMPOSE_FILE" -p "$PROJECT_NAME" down -v --remove-orphans
 
 if [[ "$FLAG" == "--with-images" ]]; then
