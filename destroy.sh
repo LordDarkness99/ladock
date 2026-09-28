@@ -2,15 +2,25 @@
 set -euo pipefail
 
 # ============================================================
-#  Laravel Docker Auto-Deploy - Cleanup
-#  Usage: ./destroy.sh /path/to/laravel-project [--with-images]
+#  Laravel Docker Auto-Deploy — Cleanup
+#  Mendukung mode Monolith & Microservice secara otomatis.
+#
+#  Usage:
+#    ./destroy.sh /path/to/project [--with-images]
+#
+#  Mode Monolith : project-path langsung adalah folder Laravel
+#  Mode Microservice : project-path adalah folder root yang berisi sub-services
 # ============================================================
 
 PROJECT_PATH="${1:-}"
-FLAG="${2:-}"
+WITH_IMAGES=0
+
+for arg in "${@:2}"; do
+  [[ "$arg" == "--with-images" ]] && WITH_IMAGES=1
+done
 
 if [[ -z "$PROJECT_PATH" ]]; then
-  echo "Usage: $0 /path/to/laravel-project [--with-images]"
+  echo "Usage: $0 /path/to/project [--with-images]"
   exit 1
 fi
 
@@ -26,17 +36,38 @@ else
 fi
 
 if [[ ! -f "$COMPOSE_FILE" ]]; then
-  echo "Tidak ditemukan .docker-compose.yml di $PROJECT_PATH (project belum pernah di-deploy dengan script ini?)"
+  echo "Tidak ditemukan .docker-compose.yml di $PROJECT_PATH"
+  echo "(Project belum pernah di-deploy dengan script ini?)"
   exit 1
 fi
 
-echo "-> Menghentikan & menghapus container + volume DB project '$PROJECT_NAME'..."
+echo "--> Menghentikan & menghapus container + volume DB project '$PROJECT_NAME'..."
 cd "$PROJECT_PATH"
 $DC -f "$COMPOSE_FILE" -p "$PROJECT_NAME" down -v --remove-orphans
 
-if [[ "$FLAG" == "--with-images" ]]; then
-  echo "-> Menghapus image terkait project ini..."
-  docker images --filter "reference=${PROJECT_NAME}*" -q | xargs -r docker rmi -f
+if [[ $WITH_IMAGES -eq 1 ]]; then
+  echo "--> Menghapus image terkait project ini..."
+  docker images --filter "reference=${PROJECT_NAME}*" -q | xargs -r docker rmi -f 2>/dev/null || true
+  docker images --filter "reference=*${PROJECT_NAME}*" -q | xargs -r docker rmi -f 2>/dev/null || true
 fi
+
+# ── Hapus file generated di .docker/ ─────────────────────────────────────────
+DOCKER_DIR="$PROJECT_PATH/.docker"
+if [[ -d "$DOCKER_DIR" ]]; then
+  echo "--> Menghapus file konfigurasi Docker yang di-generate ($DOCKER_DIR)..."
+  rm -rf "$DOCKER_DIR/apache-vhost.conf"
+  rm -rf "$DOCKER_DIR/apache-gateway.conf"
+  rm -rf "$DOCKER_DIR/Dockerfile"
+  rm -rf "$DOCKER_DIR/gateway"
+  # Hapus credentials jika --with-images (cleanup total)
+  if [[ $WITH_IMAGES -eq 1 ]]; then
+    echo "--> Menghapus kredensial database..."
+    rm -rf "$DOCKER_DIR/credentials"
+    rmdir "$DOCKER_DIR" 2>/dev/null || true
+  fi
+fi
+
+# Hapus .docker-compose.yml di root project
+rm -f "$COMPOSE_FILE"
 
 echo "Cleanup selesai untuk '$PROJECT_NAME'."
