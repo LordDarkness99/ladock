@@ -14,6 +14,7 @@ Automation untuk deploy project Laravel ke Docker — mendukung **Monolith** mau
 - **Database-per-service**: 1 container MySQL shared, dengan database & user terpisah per service.
 - **Inter-service discovery**: URL service lain otomatis diinjeksi ke `.env` masing-masing service (`SERVICE_AUTH_URL`, `SERVICE_ORDER_URL`, dst.)
 - **Auto-import dump `.sql`**: Dump database dideteksi dan diimpor otomatis per service.
+- **Web Monitoring & Control Center**: Dashboard realtime (`http://localhost:9090`) untuk memantau status semua container, CPU/RAM, live HTTP probe, log viewer, dan 1-click shortcut terminal/MySQL.
 - **Backward-compatible**: Deploy monolith lama tetap berjalan persis sama seperti sebelumnya.
 - **Extract cPanel backup**: Support `--cpmove=` untuk deploy langsung dari arsip backup cPanel.
 - **PHP auto-detect**: Versi PHP dideteksi dari `composer.json` masing-masing service.
@@ -26,6 +27,10 @@ Automation untuk deploy project Laravel ke Docker — mendukung **Monolith** mau
 ladock/
 ├── deploy.sh                    <- entry point utama
 ├── destroy.sh                   <- cleanup container & file
+├── monitor.sh                   <- launcher web monitoring dashboard
+├── monitor/
+│   ├── server.py                <- Python HTTP server background daemon
+│   └── public/                  <- Single Page App (HTML, modern Glassmorphic CSS, JS)
 ├── templates/
 │   ├── Dockerfile               <- image PHP + Apache per service
 │   ├── docker-compose.yml.tpl   <- template compose mode monolith
@@ -50,6 +55,39 @@ ladock/
 - Docker & Docker Compose sudah terinstall
 - **Python 3** sudah terinstall
 - openssl tersedia (untuk generate password)
+
+---
+
+## Web Monitoring & Control Center
+
+Untuk mempermudah pemantauan semua project yang sudah di-deploy (baik monolith maupun microservices), gunakan dashboard web interaktif:
+
+```bash
+chmod +x monitor.sh
+
+# Jalankan dashboard di background (default port 9090)
+./monitor.sh start
+
+# Jalankan di custom port (contoh: 8989)
+./monitor.sh start 8989
+
+# Cek status & URL
+./monitor.sh status
+
+# Hentikan dashboard
+./monitor.sh stop
+```
+
+Buka di browser: **`http://localhost:9090`**
+
+### Fitur Dashboard:
+1. **Shortcut Akses Cepat**: 1-klik untuk membuka semua URL aplikasi web dan Apache Gateway yang aktif.
+2. **Cluster Health & Resource**: Realtime CPU load, Memory usage, dan status health probe HTTP.
+3. **Apache Gateway Visualizer**: Pemetaan route microservice (`/api/...`) ke container internal secara visual.
+4. **Database Credentials & CLI**: 1-klik copy perintah terminal `mysql -h ... -u ... -p...` dan konfigurasi `.env`.
+5. **Realtime Log Viewer**: Streaming log langsung di web browser dengan auto-scroll dan filter pencarian.
+6. **Container Lifecycle**: Tombol Restart, Stop, dan Start container langsung dari web.
+7. **Cheat Sheet CLI**: Kumpulan command `docker exec`, `php artisan`, dan `composer` yang disesuaikan untuk masing-masing container.
 
 ---
 

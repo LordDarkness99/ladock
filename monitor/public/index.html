@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LaDock Monitoring & Control Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Top Navigation -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="brand">
+          <div class="brand-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+              <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+              <line x1="6" y1="6" x2="6.01" y2="6"></line>
+              <line x1="6" y1="18" x2="6.01" y2="18"></line>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <div class="brand-title">LaDock Monitor</div>
+            <div class="brand-sub">Microservice & Monolith Control Center</div>
+          </div>
+        </div>
+        <div class="status-indicator-pill" id="global-status-pill">
+          <span class="status-dot pulsing"></span>
+          <span id="global-status-text">Memuat status cluster...</span>
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <!-- Search & Filter -->
+        <div class="search-box">
+          <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="filter-input" placeholder="Cari project, container, port..." autocomplete="off">
+        </div>
+
+        <!-- Mode filter buttons -->
+        <div class="segmented-control">
+          <button class="seg-btn active" data-filter="all">Semua</button>
+          <button class="seg-btn" data-filter="microservices">Microservices</button>
+          <button class="seg-btn" data-filter="monolith">Monolith</button>
+        </div>
+
+        <!-- Auto refresh selector -->
+        <div class="refresh-controls">
+          <select id="refresh-interval-select" class="dropdown-select" title="Interval Auto Refresh">
+            <option value="2000">Auto: 2 Detik</option>
+            <option value="5000" selected>Auto: 5 Detik</option>
+            <option value="10000">Auto: 10 Detik</option>
+            <option value="0">Jeda (Manual)</option>
+          </select>
+          <button id="btn-manual-refresh" class="btn-icon" title="Refresh Sekarang">
+            <svg id="refresh-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main-container">
+      <!-- Global Summary Cards -->
+      <section class="summary-grid" id="summary-section">
+        <div class="stat-card">
+          <div class="stat-header">
+            <span class="stat-label">Total Projects</span>
+            <span class="stat-badge project-badge">Active</span>
+          </div>
+          <div class="stat-value" id="stat-total-projects">-</div>
+          <div class="stat-footer">
+            <span id="stat-micro-count">0 Microservice</span> • <span id="stat-mono-count">0 Monolith</span>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-header">
+            <span class="stat-label">Total Containers</span>
+            <span class="stat-badge running-badge" id="stat-badge-running">0 Running</span>
+          </div>
+          <div class="stat-value" id="stat-total-containers">-</div>
+          <div class="stat-footer">
+            <span class="text-success" id="stat-running-count">0 aktif</span> • <span class="text-danger" id="stat-stopped-count">0 berhenti</span>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-header">
+            <span class="stat-label">Cluster CPU Load</span>
+            <span class="stat-badge neutral-badge">Live</span>
+          </div>
+          <div class="stat-value" id="stat-avg-cpu">0.0%</div>
+          <div class="stat-footer">
+            <div class="stat-progress-bar">
+              <div class="stat-progress-fill" id="stat-cpu-bar" style="width: 0%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-header">
+            <span class="stat-label">Total Memory Usage</span>
+            <span class="stat-badge memory-badge">Live</span>
+          </div>
+          <div class="stat-value" id="stat-total-mem">-</div>
+          <div class="stat-footer" id="stat-mem-detail">
+            Memuat penggunaan RAM...
+          </div>
+        </div>
+      </section>
+
+      <!-- Fast Access Shortcuts Strip -->
+      <section class="shortcuts-strip" id="shortcuts-strip">
+        <div class="strip-label">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+          <span>Akses Cepat Layanan Web:</span>
+        </div>
+        <div class="strip-items" id="quick-links-container">
+          <!-- Populated dynamically -->
+        </div>
+      </section>
+
+      <!-- Projects Section -->
+      <section class="projects-section">
+        <div class="section-header">
+          <h2 class="section-title">Daftar Project Ter-deploy</h2>
+          <span class="last-updated" id="last-updated-text">Diperbarui: -</span>
+        </div>
+
+        <div class="projects-list" id="projects-container">
+          <!-- Loading skeleton -->
+          <div class="project-skeleton">
+            <div class="skeleton-line full"></div>
+            <div class="skeleton-line half"></div>
+            <div class="skeleton-box"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Modals -->
+    <!-- 1. Realtime Log Viewer Modal -->
+    <div class="modal-backdrop" id="log-modal" style="display: none;">
+      <div class="modal-dialog modal-large">
+        <div class="modal-header">
+          <div class="modal-title-wrap">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot green"></span>
+            <h3 class="modal-title" id="log-modal-title">Logs: container_name</h3>
+          </div>
+          <div class="modal-actions">
+            <label class="auto-scroll-label">
+              <input type="checkbox" id="log-auto-scroll" checked>
+              <span>Auto-scroll</span>
+            </label>
+            <select id="log-tail-select" class="dropdown-select-sm">
+              <option value="50">50 baris</option>
+              <option value="150" selected>150 baris</option>
+              <option value="300">300 baris</option>
+              <option value="500">500 baris</option>
+            </select>
+            <button class="btn-sm btn-ghost" id="btn-copy-logs" title="Copy Semua Log">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              <span>Copy</span>
+            </button>
+            <button class="btn-close" id="btn-close-log-modal">&times;</button>
+          </div>
+        </div>
+        <div class="modal-body log-modal-body">
+          <div class="log-filter-bar">
+            <input type="text" id="log-search-input" placeholder="Filter teks log...">
+          </div>
+          <pre class="terminal-window" id="log-content-pre">Memuat logs...</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. CLI Shortcuts Cheat Sheet Modal -->
+    <div class="modal-backdrop" id="shortcuts-modal" style="display: none;">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h3 class="modal-title" id="shortcuts-modal-title">⚡ CLI Shortcuts & Commands</h3>
+          <button class="btn-close" id="btn-close-shortcuts-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-desc" id="shortcuts-modal-desc">Klik ikon copy untuk menyalin perintah ke terminal Anda.</p>
+          <div class="shortcuts-command-list" id="shortcuts-command-list">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast-container" id="toast-container"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -9,3 +9,9 @@ mysql -h 127.0.0.1 -P 3307 -u travel_agency_admin__user -p
 
 ./destroy.sh /home/nizar/Documents/summy/jatimfair2022_laravel
 ./deploy.sh --cpmove=/home/nizar/Documents/summy/cpmove-jatimfair2022.tar.gz 8083 3308
+
+# Web Dashboard & Monitoring (Microservice & Monolith):
+# Akses: http://localhost:9090
+./monitor.sh start 9090
+./monitor.sh status
+./monitor.sh stop
