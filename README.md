@@ -33,7 +33,8 @@ ladock/
 │   └── public/                  <- Single Page App (HTML, modern Glassmorphic CSS, JS)
 ├── templates/
 │   ├── Dockerfile               <- image PHP + Apache per service
-│   ├── docker-compose.yml.tpl   <- template compose mode monolith
+│   ├── docker-compose-db.yml.tpl<- template compose stack Database
+│   ├── docker-compose-app.yml.tpl<- template compose stack Application
 │   ├── apache-vhost.conf.tpl    <- vhost Apache per service app
 │   ├── gateway.Dockerfile       <- image Apache Gateway (httpd:alpine)
 │   └── gateway-httpd.conf       <- konfigurasi httpd minimal gateway
@@ -176,14 +177,11 @@ my-project/
    /        -> Discovery Dashboard (HTML)
         |
 [ Container Network: PROJECT_net ]
-   |           |           |
-[app_auth] [app_user] [app_order]   <- PHP+Apache per service
-       \        |        /
-        \       |       /
-       [db_PROJECT] <- MySQL 8 shared
-        DB: proj_auth_db
-        DB: proj_user_db
-        DB: proj_order_db
+   |                  |                  |
+[app_auth]        [app_user]        [app_order]   <- PHP+Apache per service
+    |                  |                  |
+[db_auth]         [db_user]         [db_order]    <- Container MySQL 8 terpisah per service
+  (3307)             (3308)             (3309)
 ```
 
 ### Routing Detail

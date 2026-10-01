@@ -27,7 +27,9 @@ fi
 PROJECT_PATH="$(cd "$PROJECT_PATH" && pwd)"
 RAW_NAME="$(basename "$PROJECT_PATH")"
 PROJECT_NAME="$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g' | sed -E 's/^_+|_+$//g')"
-COMPOSE_FILE="$PROJECT_PATH/.docker-compose.yml"
+COMPOSE_DB_FILE="$PROJECT_PATH/.docker-compose-db.yml"
+COMPOSE_APP_FILE="$PROJECT_PATH/.docker-compose-app.yml"
+OLD_COMPOSE_FILE="$PROJECT_PATH/.docker-compose.yml"
 
 if docker compose version >/dev/null 2>&1; then
   DC="docker compose"
@@ -35,15 +37,27 @@ else
   DC="docker-compose"
 fi
 
-if [[ ! -f "$COMPOSE_FILE" ]]; then
-  echo "Tidak ditemukan .docker-compose.yml di $PROJECT_PATH"
+if [[ ! -f "$COMPOSE_DB_FILE" && ! -f "$COMPOSE_APP_FILE" && ! -f "$OLD_COMPOSE_FILE" ]]; then
+  echo "Tidak ditemukan file .docker-compose-*.yml di $PROJECT_PATH"
   echo "(Project belum pernah di-deploy dengan script ini?)"
   exit 1
 fi
 
 echo "--> Menghentikan & menghapus container + volume DB project '$PROJECT_NAME'..."
 cd "$PROJECT_PATH"
-$DC -f "$COMPOSE_FILE" -p "$PROJECT_NAME" down -v --remove-orphans
+
+if [[ -f "$COMPOSE_APP_FILE" ]]; then
+  $DC -f "$COMPOSE_APP_FILE" -p "$PROJECT_NAME" down --remove-orphans >/dev/null 2>&1 || true
+fi
+if [[ -f "$COMPOSE_DB_FILE" ]]; then
+  $DC -f "$COMPOSE_DB_FILE" -p "$PROJECT_NAME" down -v --remove-orphans >/dev/null 2>&1 || true
+fi
+if [[ -f "$OLD_COMPOSE_FILE" ]]; then
+  $DC -f "$OLD_COMPOSE_FILE" -p "$PROJECT_NAME" down -v --remove-orphans >/dev/null 2>&1 || true
+fi
+
+# Menghapus network jika ada
+docker network rm "${PROJECT_NAME}_net" >/dev/null 2>&1 || true
 
 if [[ $WITH_IMAGES -eq 1 ]]; then
   echo "--> Menghapus image terkait project ini..."
@@ -67,7 +81,7 @@ if [[ -d "$DOCKER_DIR" ]]; then
   fi
 fi
 
-# Hapus .docker-compose.yml di root project
-rm -f "$COMPOSE_FILE"
+# Hapus .docker-compose-*.yml di root project
+rm -f "$COMPOSE_DB_FILE" "$COMPOSE_APP_FILE" "$OLD_COMPOSE_FILE"
 
 echo "Cleanup selesai untuk '$PROJECT_NAME'."

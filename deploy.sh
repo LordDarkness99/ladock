@@ -216,7 +216,8 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
 
   DOCKER_DIR="$PROJECT_PATH/.docker"
   CREDS_FILE="$DOCKER_DIR/credentials.env"
-  COMPOSE_FILE="$PROJECT_PATH/.docker-compose.yml"
+  COMPOSE_DB_FILE="$PROJECT_PATH/.docker-compose-db.yml"
+  COMPOSE_APP_FILE="$PROJECT_PATH/.docker-compose-app.yml"
   mkdir -p "$DOCKER_DIR"
 
   # ── Kredensial DB ────────────────────────────────────────────────────────
@@ -242,7 +243,7 @@ EOF
   fi
 
   # ── Render template ──────────────────────────────────────────────────────
-  log "Menyiapkan file Docker (Dockerfile, apache-vhost.conf, docker-compose.yml)..."
+  log "Menyiapkan file Docker (Dockerfile, apache-vhost.conf, .docker-compose-db.yml, .docker-compose-app.yml)..."
   rm -rf "$DOCKER_DIR/Dockerfile" "$DOCKER_DIR/apache-vhost.conf"
   cp "$TEMPLATE_DIR/Dockerfile" "$DOCKER_DIR/Dockerfile"
 
@@ -250,15 +251,24 @@ EOF
       "$TEMPLATE_DIR/apache-vhost.conf.tpl" > "$DOCKER_DIR/apache-vhost.conf"
 
   sed -e "s/__PROJECT__/$PROJECT_NAME/g" \
-      -e "s/__HTTP_PORT__/$HTTP_PORT/g" \
       -e "s/__DB_PORT__/$DB_PORT/g" \
       -e "s/__DB_NAME__/$DB_NAME/g" \
       -e "s/__DB_USER__/$DB_USER/g" \
       -e "s/__DB_PASS__/$DB_PASS/g" \
       -e "s/__DB_ROOT_PASS__/$DB_ROOT_PASS/g" \
+      "$TEMPLATE_DIR/docker-compose-db.yml.tpl" > "$COMPOSE_DB_FILE"
+
+  sed -e "s/__PROJECT__/$PROJECT_NAME/g" \
+      -e "s/__HTTP_PORT__/$HTTP_PORT/g" \
+      -e "s/__DB_NAME__/$DB_NAME/g" \
+      -e "s/__DB_USER__/$DB_USER/g" \
+      -e "s/__DB_PASS__/$DB_PASS/g" \
       -e "s/__PHP_VERSION__/$PHP_VERSION/g" \
       -e "s/__COMPOSER_VERSION__/$COMPOSER_VERSION/g" \
-      "$TEMPLATE_DIR/docker-compose.yml.tpl" > "$COMPOSE_FILE"
+      "$TEMPLATE_DIR/docker-compose-app.yml.tpl" > "$COMPOSE_APP_FILE"
+
+  # Hapus file compose lama jika ada
+  rm -f "$PROJECT_PATH/.docker-compose.yml"
 
   # ── .env Laravel ────────────────────────────────────────────────────────
   cd "$PROJECT_PATH"
@@ -292,20 +302,24 @@ EOF
 
   # ── Down lama → Build → Up ───────────────────────────────────────────────
   log "Membersihkan container lama project ini (jika ada)..."
-  $DC -f "$COMPOSE_FILE" -p "$PROJECT_NAME" down --remove-orphans >/dev/null 2>&1 || true
+  $DC -f "$COMPOSE_APP_FILE" -p "$PROJECT_NAME" down --remove-orphans >/dev/null 2>&1 || true
+  $DC -f "$COMPOSE_DB_FILE" -p "$PROJECT_NAME" down --remove-orphans >/dev/null 2>&1 || true
 
-  log "Build image & menjalankan container..."
-  $DC -f "$COMPOSE_FILE" -p "$PROJECT_NAME" up -d --build
+  log "Menjalankan container Database..."
+  $DC -f "$COMPOSE_DB_FILE" -p "$PROJECT_NAME" up -d
 
   # ── Tunggu MySQL ─────────────────────────────────────────────────────────
   log "Menunggu MySQL siap (hingga 90 detik)..."
   timeout=90; elapsed=0
-  until $DC -f "$COMPOSE_FILE" -p "$PROJECT_NAME" exec -T "db_${PROJECT_NAME}" \
+  until $DC -f "$COMPOSE_DB_FILE" -p "$PROJECT_NAME" exec -T "db_${PROJECT_NAME}" \
         mysql -uroot -p"$DB_ROOT_PASS" -e "SELECT 1" >/dev/null 2>&1; do
     [[ $elapsed -ge $timeout ]] && echo "MySQL tidak siap setelah $timeout detik." && exit 1
     sleep 2; elapsed=$((elapsed+2)); info "... menunggu ($elapsed/${timeout}s)"
   done
   echo "MySQL siap!"
+
+  log "Build image & menjalankan container App..."
+  $DC -f "$COMPOSE_APP_FILE" -p "$PROJECT_NAME" up -d --build
 
   # ── Import dump ──────────────────────────────────────────────────────────
   SHOULD_IMPORT=0
@@ -316,7 +330,7 @@ EOF
     DUMP_ARGS=(
       --project-path "$PROJECT_PATH"
       --project-name "$PROJECT_NAME"
-      --compose-file "$COMPOSE_FILE"
+      --compose-file "$COMPOSE_DB_FILE"
       --db-name      "$DB_NAME"
       --db-root-pass "$DB_ROOT_PASS"
       --dc           "$DC"
@@ -329,7 +343,7 @@ EOF
 
   # ── Setup Laravel ─────────────────────────────────────────────────────────
   log "Menjalankan composer install & migrate di dalam container..."
-  $DC -f "$COMPOSE_FILE" -p "$PROJECT_NAME" exec -T "app_${PROJECT_NAME}" bash -lc "
+  $DC -f "$COMPOSE_APP_FILE" -p "$PROJECT_NAME" exec -T "app_${PROJECT_NAME}" bash -lc "
     set -e
     if composer install --no-interaction --prefer-dist --optimize-autoloader 2>&1 | tee /tmp/composer_output | grep -q 'does not satisfy'; then
       echo '⚠️  Dependencies tidak kompatibel, menjalankan composer update...'
@@ -504,8 +518,11 @@ for svc_name in "${SVC_NAMES[@]}"; do
   SVC_PATHS_ARG+="${svc_name}:${SVC_PATHS[$svc_name]}"
 done
 
-# ── Generate docker-compose.yml ───────────────────────────────────────────────
-log "Men-generate docker-compose.yml (${#SVC_NAMES[@]} services + gateway + MySQL)..."
+COMPOSE_DB_FILE="$PROJECT_PATH/.docker-compose-db.yml"
+COMPOSE_APP_FILE="$PROJECT_PATH/.docker-compose-app.yml"
+
+# ── Generate docker-compose-db.yml & docker-compose-app.yml ──────────────────
+log "Men-generate docker-compose-db.yml dan docker-compose-app.yml (${#SVC_NAMES[@]} services + gateway + DBs)..."
 
 python3 "$SCRIPTS_DIR/generate_compose.py" \
   --project           "$PROJECT_NAME" \
@@ -518,7 +535,9 @@ python3 "$SCRIPTS_DIR/generate_compose.py" \
   --php-versions      "$PHP_VERS_ARG" \
   --composer-versions "$COMP_VERS_ARG" \
   --db-creds          "$DB_CREDS_ARG" \
-  > "$COMPOSE_FILE"
+  --output-dir        "$PROJECT_PATH"
+
+rm -f "$PROJECT_PATH/.docker-compose.yml"
 
 # ── Salin Dockerfile app ke folder .docker ───────────────────────────────────
 rm -rf "$DOCKER_DIR/Dockerfile" "$DOCKER_DIR/apache-vhost.conf" "$DOCKER_DIR/apache-gateway.conf"
@@ -568,7 +587,7 @@ for svc_name in "${SVC_NAMES[@]}"; do
   }
 
   set_env "DB_CONNECTION" "mysql"
-  set_env "DB_HOST"       "db_${PROJECT_NAME}"
+  set_env "DB_HOST"       "db_${svc_name}"
   set_env "DB_PORT"       "3306"
   set_env "DB_DATABASE"   "$db_name"
   set_env "DB_USERNAME"   "$db_user"
@@ -596,38 +615,44 @@ done
 # ── Down container lama ───────────────────────────────────────────────────────
 log "Membersihkan container lama (jika ada)..."
 cd "$PROJECT_PATH"
-$DC -f "$COMPOSE_FILE" -p "$PROJECT_NAME" down --remove-orphans >/dev/null 2>&1 || true
+$DC -f "$COMPOSE_APP_FILE" -p "$PROJECT_NAME" down --remove-orphans >/dev/null 2>&1 || true
+$DC -f "$COMPOSE_DB_FILE" -p "$PROJECT_NAME" down --remove-orphans >/dev/null 2>&1 || true
 
 # ── Build & Up ────────────────────────────────────────────────────────────────
-log "Build image & menjalankan semua container..."
-$DC -f "$COMPOSE_FILE" -p "$PROJECT_NAME" up -d --build
+log "Menjalankan container Database..."
+$DC -f "$COMPOSE_DB_FILE" -p "$PROJECT_NAME" up -d
 
-# ── Tunggu MySQL ──────────────────────────────────────────────────────────────
-log "Menunggu MySQL siap (hingga 90 detik)..."
-timeout=90; elapsed=0
-until $DC -f "$COMPOSE_FILE" -p "$PROJECT_NAME" exec -T "db_${PROJECT_NAME}" \
-      mysql -uroot -p"$DB_ROOT_PASS" -e "SELECT 1" >/dev/null 2>&1; do
-  [[ $elapsed -ge $timeout ]] && echo "MySQL tidak siap setelah $timeout detik." && exit 1
-  sleep 2; elapsed=$((elapsed+2)); info "... menunggu ($elapsed/${timeout}s)"
+# ── Tunggu MySQL tiap service ──────────────────────────────────────────────────
+log "Menunggu MySQL tiap service siap (hingga 90 detik)..."
+for svc_name in "${SVC_NAMES[@]}"; do
+  timeout=90; elapsed=0
+  until $DC -f "$COMPOSE_DB_FILE" -p "$PROJECT_NAME" exec -T "db_${svc_name}" \
+        mysql -uroot -p"$DB_ROOT_PASS" -e "SELECT 1" >/dev/null 2>&1; do
+    [[ $elapsed -ge $timeout ]] && echo "MySQL db_${svc_name} tidak siap setelah $timeout detik." && exit 1
+    sleep 2; elapsed=$((elapsed+2)); info "... menunggu db_${svc_name} ($elapsed/${timeout}s)"
+  done
+  log "MySQL db_${svc_name} siap!"
 done
-echo "MySQL siap!"
 
 # ── Buat database & user per service ─────────────────────────────────────────
-log "Membuat database & user MySQL per service..."
+log "Memastikan database & user MySQL per service..."
 for svc_name in "${SVC_NAMES[@]}"; do
   db_name="${SVC_DB_NAMES[$svc_name]}"
   db_user="${SVC_DB_USERS[$svc_name]}"
   db_pass="${SVC_DB_PASSES[$svc_name]}"
 
-  $DC -f "$COMPOSE_FILE" -p "$PROJECT_NAME" exec -T "db_${PROJECT_NAME}" \
+  $DC -f "$COMPOSE_DB_FILE" -p "$PROJECT_NAME" exec -T "db_${svc_name}" \
     mysql -uroot -p"$DB_ROOT_PASS" -e "
       CREATE DATABASE IF NOT EXISTS \`${db_name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
       CREATE USER IF NOT EXISTS '${db_user}'@'%' IDENTIFIED BY '${db_pass}';
       GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${db_user}'@'%';
       FLUSH PRIVILEGES;
     " >/dev/null 2>&1
-  log "[$svc_name] DB '${db_name}' & user '${db_user}' siap"
+  log "[$svc_name] DB '${db_name}' & user '${db_user}' di container db_${svc_name} siap"
 done
+
+log "Build image & menjalankan semua container App & Gateway..."
+$DC -f "$COMPOSE_APP_FILE" -p "$PROJECT_NAME" up -d --build
 
 # ── Import dump & setup Laravel per service ───────────────────────────────────
 for svc_name in "${SVC_NAMES[@]}"; do
@@ -650,7 +675,7 @@ for svc_name in "${SVC_NAMES[@]}"; do
     python3 "$SCRIPTS_DIR/db_import.py" \
       --project-path "$svc_path" \
       --project-name "$PROJECT_NAME" \
-      --compose-file "$COMPOSE_FILE" \
+      --compose-file "$COMPOSE_DB_FILE" \
       --db-name      "$db_name" \
       --db-root-pass "$DB_ROOT_PASS" \
       --dc           "$DC"
@@ -660,7 +685,7 @@ for svc_name in "${SVC_NAMES[@]}"; do
 
   # Setup Laravel
   log "[$svc_name] Menjalankan composer install & migrate..."
-  $DC -f "$COMPOSE_FILE" -p "$PROJECT_NAME" exec -T "app_${svc_name}" bash -lc "
+  $DC -f "$COMPOSE_APP_FILE" -p "$PROJECT_NAME" exec -T "app_${svc_name}" bash -lc "
     set -e
     cd /var/www
     if composer install --no-interaction --prefer-dist --optimize-autoloader 2>&1 | tee /tmp/composer_out | grep -q 'does not satisfy'; then
