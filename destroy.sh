@@ -47,10 +47,10 @@ echo "--> Menghentikan & menghapus container + volume DB project '$PROJECT_NAME'
 cd "$PROJECT_PATH"
 
 if [[ -f "$COMPOSE_APP_FILE" ]]; then
-  $DC -f "$COMPOSE_APP_FILE" -p "$PROJECT_NAME" down --remove-orphans >/dev/null 2>&1 || true
+  $DC -f "$COMPOSE_APP_FILE" -p "${PROJECT_NAME}_app_stack" down --remove-orphans >/dev/null 2>&1 || true
 fi
 if [[ -f "$COMPOSE_DB_FILE" ]]; then
-  $DC -f "$COMPOSE_DB_FILE" -p "$PROJECT_NAME" down -v --remove-orphans >/dev/null 2>&1 || true
+  $DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" down -v --remove-orphans >/dev/null 2>&1 || true
 fi
 if [[ -f "$OLD_COMPOSE_FILE" ]]; then
   $DC -f "$OLD_COMPOSE_FILE" -p "$PROJECT_NAME" down -v --remove-orphans >/dev/null 2>&1 || true

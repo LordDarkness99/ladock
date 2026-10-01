@@ -42,6 +42,7 @@ def main():
     ap.add_argument("--project-path", required=True)
     ap.add_argument("--project-name", required=True)
     ap.add_argument("--compose-file", required=True)
+    ap.add_argument("--compose-project-name", default=None)
     ap.add_argument("--db-name", required=True)
     ap.add_argument("--db-root-pass", required=True)
     ap.add_argument("--dump", default=None, help="Path eksplisit ke file .sql (opsional, kalau tidak diisi akan dicari otomatis)")
@@ -70,9 +71,10 @@ def main():
     print(f"-> Mengimpor '{os.path.basename(dump_path)}' ke database '{args.db_name}' ...")
 
     db_service = f"db_{args.project_name}"
+    project_name_flag = args.compose_project_name if args.compose_project_name else args.project_name
     dc_cmd = args.dc.split() + [
         "-f", args.compose_file,
-        "-p", args.project_name,
+        "-p", project_name_flag,
         "exec", "-T", db_service,
         "mysql", "-uroot", f"-p{args.db_root_pass}", args.db_name,
     ]
