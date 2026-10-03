@@ -142,9 +142,9 @@
       console.error("Gagal refresh data cluster:", err);
       el.globalStatusText.textContent = "Koneksi terputus / Docker down";
       el.globalStatusPill.classList.remove('status-indicator-pill');
-      el.globalStatusPill.style.background = 'rgba(239, 68, 68, 0.15)';
-      el.globalStatusPill.style.color = '#ef4444';
-      el.globalStatusPill.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+      el.globalStatusPill.style.background = '#fef2f2';
+      el.globalStatusPill.style.color = '#dc2626';
+      el.globalStatusPill.style.borderColor = 'rgba(220, 38, 38, 0.3)';
     } finally {
       state.isRefreshing = false;
       el.refreshIcon.classList.remove('rotating');
@@ -298,12 +298,12 @@
 
     if (filtered.length === 0) {
       el.projectsContainer.innerHTML = `
-        <div style="text-align: center; padding: 3rem; background: var(--bg-glass-card); border-radius: var(--radius-lg); border: 1px solid var(--border-subtle);">
+        <div style="text-align: center; padding: 3rem; background: var(--bg-surface); border-radius: var(--radius-lg); border: 1px solid var(--border-subtle);">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="1.5" style="margin-bottom: 0.5rem;">
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
-          <h3 style="font-size: 1.1rem; color: #fff;">Tidak ada project yang cocok</h3>
+          <h3 style="font-size: 1.1rem; color: var(--text-main);">Tidak ada project yang cocok</h3>
           <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 0.25rem;">Coba ubah kata kunci pencarian atau filter mode.</p>
         </div>
       `;

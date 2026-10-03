@@ -30,7 +30,7 @@ ladock/
 ├── monitor.sh                   <- launcher web monitoring dashboard
 ├── monitor/
 │   ├── server.py                <- Python HTTP server background daemon
-│   └── public/                  <- Single Page App (HTML, modern Glassmorphic CSS, JS)
+│   └── public/                  <- Single Page App (HTML, clean light minimalist CSS, JS)
 ├── templates/
 │   ├── Dockerfile               <- image PHP + Apache per service
 │   ├── docker-compose-db.yml.tpl<- template compose stack Database
