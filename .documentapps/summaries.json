@@ -1,0 +1,68 @@
+{
+  "README.md": {
+    "summary": "Dokumentasi LaDock, alat otomasi deployment aplikasi Laravel ke Docker dalam mode monolith maupun microservices, termasuk cara instalasi, penggunaan, monitoring, dan struktur repository."
+  },
+  "deploy.sh": {
+    "summary": "Entry point Bash untuk menyiapkan dan men-deploy project Laravel ke Docker; mendeteksi mode monolith atau microservices, membangun konfigurasi layanan, database, Apache, dan gateway."
+  },
+  "destroy.sh": {
+    "summary": "Skrip Bash untuk menghentikan dan membersihkan container, network, volume, serta file deployment LaDock untuk project yang dipilih."
+  },
+  "monitor.sh": {
+    "summary": "Launcher dashboard monitoring LaDock untuk menjalankan, memeriksa status, dan menghentikan server web monitor pada port yang ditentukan."
+  },
+  "monitor/server.py": {
+    "summary": "Server HTTP Python multithreaded untuk dashboard LaDock; menyediakan data status container Docker, statistik CPU/RAM, probe port, log, dan aksi kontrol container."
+  },
+  "monitor/public/index.html": {
+    "summary": "Kerangka dashboard LaDock Monitor berbahasa Indonesia dengan ringkasan project dan resource, filter, shortcut layanan, daftar deployment, serta modal log dan perintah CLI."
+  },
+  "monitor/public/app.js": {
+    "summary": "Logika frontend dashboard LaDock Monitor untuk mengambil data server, memperbarui status dan statistik, memfilter project/container, menampilkan log, dan menjalankan shortcut aksi."
+  },
+  "monitor/public/style.css": {
+    "summary": "Gaya visual responsif untuk dashboard LaDock Monitor, termasuk navigasi, kartu statistik, daftar project, kontrol, modal, status, dan notifikasi."
+  },
+  "scripts/db_import.py": {
+    "summary": "Utilitas untuk menemukan dump SQL di project Laravel atau menerima path dump eksplisit, lalu mengimpor dump ke database MySQL dalam container Docker."
+  },
+  "scripts/detect_php_version.py": {
+    "summary": "Mendeteksi constraint versi PHP dari composer.json project Laravel dan memilih versi yang didukung, dengan fallback PHP 8.4."
+  },
+  "scripts/extract_cpmove.py": {
+    "summary": "Mengekstrak arsip backup cPanel cpmove/backup, menyatukan source Laravel dan webroot public bila terpisah, lalu menghasilkan folder project yang siap di-deploy."
+  },
+  "scripts/find_laravel_projects.py": {
+    "summary": "Memindai direktori secara rekursif untuk menemukan project Laravel berdasarkan file artisan, melewati direktori yang tidak relevan, dan mencetak path project."
+  },
+  "scripts/find_microservices.py": {
+    "summary": "Memindai folder induk secara rekursif untuk menemukan sub-project Laravel yang memiliki artisan dan composer.json, lalu menghasilkan nama service Docker yang unik beserta path-nya."
+  },
+  "scripts/generate_compose.py": {
+    "summary": "Membangun konfigurasi Docker Compose untuk database dan aplikasi per service pada deployment microservices, memakai port, kredensial, versi PHP, dan path yang diberikan."
+  },
+  "scripts/generate_gateway_conf.py": {
+    "summary": "Menghasilkan konfigurasi Apache API Gateway yang merutekan prefix URL ke container service microservices dan menyajikan halaman discovery pada root."
+  },
+  "templates/Dockerfile": {
+    "summary": "Template image aplikasi Laravel berbasis PHP dan Apache, termasuk ekstensi/runtime yang dibutuhkan untuk menjalankan tiap service."
+  },
+  "templates/apache-vhost.conf.tpl": {
+    "summary": "Template VirtualHost Apache untuk menyajikan aplikasi Laravel dari document root public dan meneruskan request ke front controller."
+  },
+  "templates/docker-compose-app.yml.tpl": {
+    "summary": "Template Docker Compose untuk layanan aplikasi Laravel dalam mode monolith, termasuk build image, konfigurasi runtime, port, dan mount project."
+  },
+  "templates/docker-compose-db.yml.tpl": {
+    "summary": "Template Docker Compose untuk container MySQL database deployment LaDock beserta environment dan penyimpanan datanya."
+  },
+  "templates/gateway.Dockerfile": {
+    "summary": "Dockerfile untuk membangun image Apache httpd sebagai API Gateway bagi deployment microservices."
+  },
+  "templates/gateway-httpd.conf": {
+    "summary": "Konfigurasi dasar Apache httpd untuk container gateway, mengaktifkan modul dan pengaturan yang diperlukan untuk reverse proxy."
+  },
+  "track.txt": {
+    "summary": "Catatan command dan contoh path deployment lokal, koneksi MySQL, serta penggunaan dashboard monitoring LaDock."
+  }
+}
