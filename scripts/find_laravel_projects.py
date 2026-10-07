@@ -36,7 +36,7 @@ def find_laravel_projects(root: str, max_depth: int = MAX_DEPTH):
         # jangan turun ke folder yang jelas bukan tempat project Laravel lain
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
 
-        if "artisan" in filenames:
+        if "artisan" in filenames or "composer.json" in filenames or "index.php" in filenames:
             found.append(dirpath)
             dirnames[:] = []  # sudah ketemu project di sini, tidak perlu masuk lebih dalam
 

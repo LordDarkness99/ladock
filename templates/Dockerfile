@@ -10,14 +10,12 @@ FROM composer:${COMPOSER_VERSION} AS composer
 # Stage utama PHP + Apache
 FROM php:${PHP_VERSION}-apache
 
-# --- Ganti sources.list: gunakan repo utama, tanpa security (hindari 404) ---
-RUN echo "deb http://deb.debian.org/debian bullseye main contrib non-free" > /etc/apt/sources.list && \
-    echo "deb http://deb.debian.org/debian bullseye-updates main contrib non-free" >> /etc/apt/sources.list
 
 # System deps + PHP extensions (hanya yang dibutuhkan Laravel) + enable mod_rewrite
-RUN apt-get update -o Acquire::Check-Valid-Until=false \
-      -o Acquire::http::Timeout=60 \
-      -o Acquire::Retries=5 \
+RUN (sed -i 's|http://deb.debian.org/debian-security|http://archive.debian.org/debian-security|g' /etc/apt/sources.list \
+  && sed -i 's|http://security.debian.org|http://archive.debian.org|g' /etc/apt/sources.list \
+  || true) \
+ && (apt-get update -o Acquire::Check-Valid-Until=false || (sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /etc/apt/sources.list && apt-get update -o Acquire::Check-Valid-Until=false)) \
  && apt-get install -y --no-install-recommends --fix-missing \
       -o Acquire::http::Timeout=60 \
       -o Acquire::Retries=5 \
@@ -36,9 +34,8 @@ WORKDIR /var/www
 
 COPY . /var/www
 
-RUN mkdir -p storage/bootstrap/cache \
-    && chown -R www-data:www-data storage/bootstrap/cache \
-    && chown -R www-data:www-data public \
+RUN mkdir -p storage/bootstrap/cache public \
+    && chown -R www-data:www-data storage/bootstrap/cache public \
     && chmod -R 755 storage/bootstrap/cache public
 
 # Virtual host (DocumentRoot -> public/, AllowOverride All untuk .htaccess Laravel)

@@ -1,8 +1,8 @@
 <VirtualHost *:80>
     ServerName localhost
-    DocumentRoot /var/www/public
+    DocumentRoot __DOCUMENT_ROOT__
 
-    <Directory /var/www/public>
+    <Directory __DOCUMENT_ROOT__>
         Options Indexes FollowSymLinks
         AllowOverride All
         Require all granted

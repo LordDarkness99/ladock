@@ -2,11 +2,14 @@
   "README.md": {
     "summary": "Dokumentasi LaDock, alat otomasi deployment aplikasi Laravel ke Docker dalam mode monolith maupun microservices, termasuk cara instalasi, penggunaan, monitoring, dan struktur repository."
   },
+  "central_db.sh": {
+    "summary": "Skrip Bash pengelola database MySQL sentral LaDock untuk menginisialisasi network, container, volume data, serta memeriksa status siap pakai."
+  },
   "deploy.sh": {
-    "summary": "Entry point Bash untuk menyiapkan dan men-deploy project Laravel ke Docker; mendeteksi mode monolith atau microservices, membangun konfigurasi layanan, database, Apache, dan gateway."
+    "summary": "Entry point Bash untuk menyiapkan dan men-deploy project Laravel ke Docker; mendeteksi mode monolith atau microservices, memanfaatkan DB sentral, membangun konfigurasi layanan, Apache, dan gateway."
   },
   "destroy.sh": {
-    "summary": "Skrip Bash untuk menghentikan dan membersihkan container, network, volume, serta file deployment LaDock untuk project yang dipilih."
+    "summary": "Skrip Bash untuk menghentikan container project Laravel LaDock tanpa merusak atau menghentikan database sentral."
   },
   "monitor.sh": {
     "summary": "Launcher dashboard monitoring LaDock untuk menjalankan, memeriksa status, dan menghentikan server web monitor pada port yang ditentukan."
@@ -24,7 +27,7 @@
     "summary": "Gaya visual responsif untuk dashboard LaDock Monitor, termasuk navigasi, kartu statistik, daftar project, kontrol, modal, status, dan notifikasi."
   },
   "scripts/db_import.py": {
-    "summary": "Utilitas untuk menemukan dump SQL di project Laravel atau menerima path dump eksplisit, lalu mengimpor dump ke database MySQL dalam container Docker."
+    "summary": "Utilitas untuk menemukan dump SQL di project Laravel atau menerima path dump eksplisit, lalu mengimpor dump ke container database MySQL (termasuk DB sentral)."
   },
   "scripts/detect_php_version.py": {
     "summary": "Mendeteksi constraint versi PHP dari composer.json project Laravel dan memilih versi yang didukung, dengan fallback PHP 8.4."

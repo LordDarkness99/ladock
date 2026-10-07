@@ -1,0 +1,8 @@
+.git
+.docker
+node_modules
+vendor
+*.tar.gz
+*.zip
+*.gz
+*.sql

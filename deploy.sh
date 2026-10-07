@@ -180,9 +180,12 @@ fi
 # ============================================================================
 if [[ "$DEPLOY_MODE" == "monolith" ]]; then
 
-  # ── Validasi Laravel ────────────────────────────────────────────────────
-  if [[ ! -f "$PROJECT_PATH/artisan" ]]; then
-    echo "Folder '$PROJECT_PATH' bukan project Laravel yang valid (file 'artisan' tidak ditemukan)."
+  # ── Validasi PHP Project ──────────────────────────────────────────────────
+  IS_LARAVEL=0
+  if [[ -f "$PROJECT_PATH/artisan" ]]; then
+    IS_LARAVEL=1
+  elif [[ ! -f "$PROJECT_PATH/index.php" && ! -f "$PROJECT_PATH/composer.json" ]]; then
+    echo "Folder '$PROJECT_PATH' bukan project PHP yang valid (file 'index.php', 'composer.json', atau 'artisan' tidak ditemukan)."
     exit 1
   fi
 
@@ -257,8 +260,15 @@ EOF
   log "Menyiapkan file Docker (Dockerfile, apache-vhost.conf, .docker-compose-app.yml)..."
   rm -rf "$DOCKER_DIR/Dockerfile" "$DOCKER_DIR/apache-vhost.conf"
   cp "$TEMPLATE_DIR/Dockerfile" "$DOCKER_DIR/Dockerfile"
+  [[ -f "$TEMPLATE_DIR/.dockerignore" ]] && cp "$TEMPLATE_DIR/.dockerignore" "$PROJECT_PATH/.dockerignore"
+
+  DOC_ROOT="/var/www/public"
+  if [ ! -d "$PROJECT_PATH/public" ] || [ -f "$PROJECT_PATH/index.php" -a ! -f "$PROJECT_PATH/public/index.php" ]; then
+    DOC_ROOT="/var/www"
+  fi
 
   sed -e "s/__PROJECT__/$PROJECT_NAME/g" \
+      -e "s|__DOCUMENT_ROOT__|$DOC_ROOT|g" \
       "$TEMPLATE_DIR/apache-vhost.conf.tpl" > "$DOCKER_DIR/apache-vhost.conf"
 
   sed -e "s/__PROJECT__/$PROJECT_NAME/g" \
@@ -303,11 +313,35 @@ EOF
     esac
   done
 
+  # ── Copy & Configure Sample PHP Config Files (Native PHP) ────────────────
+  while IFS= read -r sample_file; do
+    [ -z "$sample_file" ] && continue
+    target_file="$(echo "$sample_file" | sed -E 's/\.(sample|example)(\.php)?$/\2/; s/\.php\.(sample|example)$/.php/')"
+    if [ ! -f "$target_file" ]; then
+      cp "$sample_file" "$target_file" || true
+      log "Membuat berkas konfig $(basename "$target_file") dari $(basename "$sample_file")"
+    fi
+
+    sed -i.bak \
+      -e "s/private \$host = .*/private \$host = \"$CENTRAL_DB_CONTAINER\";/" \
+      -e "s/private \$port = .*/private \$port = \"3306\";/" \
+      -e "s/private \$db_name = .*/private \$db_name = \"$DB_NAME\";/" \
+      -e "s/private \$username = .*/private \$username = \"$DB_USER\";/" \
+      -e "s/private \$password = .*/private \$password = \"$DB_PASS\";/" \
+      -e "s/\$host = .*/\$host = \"$CENTRAL_DB_CONTAINER\";/" \
+      -e "s/\$db_name = .*/\$db_name = \"$DB_NAME\";/" \
+      -e "s/\$db_user = .*/\$db_user = \"$DB_USER\";/" \
+      -e "s/\$db_pass = .*/\$db_pass = \"$DB_PASS\";/" \
+      "$target_file" || true
+    rm -f "${target_file}.bak" || true
+  done < <(find "$PROJECT_PATH" -type f \( -name "*.sample.php" -o -name "*.example.php" -o -name "*.php.sample" -o -name "*.php.example" \) 2>/dev/null || true)
+
   # ── Buat Database & User di DB Sentral ──────────────────────────────────
   log "Memastikan Database '$DB_NAME' & User '$DB_USER' di DB Sentral..."
   docker exec -i "$CENTRAL_DB_CONTAINER" mysql -uroot -p"$CENTRAL_DB_ROOT_PASS" -e "
     CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
     CREATE USER IF NOT EXISTS '${DB_USER}'@'%' IDENTIFIED BY '${DB_PASS}';
+    ALTER USER '${DB_USER}'@'%' IDENTIFIED BY '${DB_PASS}';
     GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'%';
     FLUSH PRIVILEGES;
   " >/dev/null 2>&1
@@ -338,27 +372,31 @@ EOF
     log "Lewati import dump (bukan deploy pertama; pakai --force-import untuk paksa)."
   fi
 
-  # ── Setup Laravel ─────────────────────────────────────────────────────────
-  log "Menjalankan composer install & migrate di dalam container..."
+  # ── Setup PHP / Laravel ───────────────────────────────────────────────────
+  log "Menyiapkan environment dan dependency projek di dalam container..."
   $DC -f "$COMPOSE_APP_FILE" -p "${PROJECT_NAME}_app_stack" exec -T "app_${PROJECT_NAME}" bash -lc "
     set -e
-    if composer install --no-interaction --prefer-dist --optimize-autoloader 2>&1 | tee /tmp/composer_output | grep -q 'does not satisfy'; then
-      echo '⚠️  Dependencies tidak kompatibel, menjalankan composer update...'
-      composer update --no-interaction --prefer-dist --optimize-autoloader
+    if [ -f composer.json ]; then
+      if composer install --no-interaction --prefer-dist --optimize-autoloader 2>&1 | tee /tmp/composer_output | grep -q 'does not satisfy'; then
+        echo '⚠️  Dependencies tidak kompatibel, menjalankan composer update...'
+        composer update --no-interaction --prefer-dist --optimize-autoloader
+      fi
     fi
-    rm -f bootstrap/cache/*.php 2>/dev/null || true
-    rm -f storage/framework/sessions/* 2>/dev/null || true
-    rm -f storage/framework/views/*.php 2>/dev/null || true
-    php artisan config:clear || true
-    php artisan route:clear  || true
-    php artisan view:clear   || true
-    php artisan cache:clear  || true
-    php artisan key:generate --force || true
-    rm -f bootstrap/cache/*.php 2>/dev/null || true
-    php artisan config:clear || true
-    php artisan route:clear  || true
-    php artisan migrate --force || true
-    php artisan storage:link  || true
+    if [ -f artisan ]; then
+      rm -f bootstrap/cache/*.php 2>/dev/null || true
+      rm -f storage/framework/sessions/* 2>/dev/null || true
+      rm -f storage/framework/views/*.php 2>/dev/null || true
+      php artisan config:clear || true
+      php artisan route:clear  || true
+      php artisan view:clear   || true
+      php artisan cache:clear  || true
+      php artisan key:generate --force || true
+      rm -f bootstrap/cache/*.php 2>/dev/null || true
+      php artisan config:clear || true
+      php artisan route:clear  || true
+      php artisan migrate --force || true
+      php artisan storage:link  || true
+    fi
   "
 
   echo ""
@@ -539,7 +577,14 @@ rm -f "$PROJECT_PATH/.docker-compose.yml"
 # ── Salin Dockerfile app ke folder .docker ───────────────────────────────────
 rm -rf "$DOCKER_DIR/Dockerfile" "$DOCKER_DIR/apache-vhost.conf" "$DOCKER_DIR/apache-gateway.conf"
 cp "$TEMPLATE_DIR/Dockerfile" "$DOCKER_DIR/Dockerfile"
+[[ -f "$TEMPLATE_DIR/.dockerignore" ]] && cp "$TEMPLATE_DIR/.dockerignore" "$PROJECT_PATH/.dockerignore"
+DOC_ROOT="/var/www/public"
+if [ ! -d "$PROJECT_PATH/public" ] || [ -f "$PROJECT_PATH/index.php" -a ! -f "$PROJECT_PATH/public/index.php" ]; then
+  DOC_ROOT="/var/www"
+fi
+
 sed -e "s/__PROJECT__/$PROJECT_NAME/g" \
+    -e "s|__DOCUMENT_ROOT__|$DOC_ROOT|g" \
     "$TEMPLATE_DIR/apache-vhost.conf.tpl" > "$DOCKER_DIR/apache-vhost.conf"
 
 # ── Siapkan Gateway ──────────────────────────────────────────────────────────

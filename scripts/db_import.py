@@ -85,9 +85,16 @@ def main():
             "mysql", "-uroot", f"-p{args.db_root_pass}", args.db_name,
         ]
 
+    import re
     try:
-        with open(dump_path, "rb") as dump_file:
-            result = subprocess.run(dc_cmd, stdin=dump_file)
+        with open(dump_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+        content = re.sub(r'(?i)CREATE\s+DATABASE\s+[^;]+;', '', content)
+        content = re.sub(r'(?i)DROP\s+DATABASE\s+[^;]+;', '', content)
+        content = re.sub(r'(?i)USE\s+[^;]+;', '', content)
+
+        sql_input = f"USE `{args.db_name}`;\nSET FOREIGN_KEY_CHECKS=0;\n{content}\nSET FOREIGN_KEY_CHECKS=1;\n".encode("utf-8")
+        result = subprocess.run(dc_cmd, input=sql_input)
     except FileNotFoundError:
         print(f"Perintah '{args.dc}' tidak ditemukan.", file=sys.stderr)
         sys.exit(1)
