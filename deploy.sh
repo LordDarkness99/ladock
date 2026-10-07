@@ -353,11 +353,21 @@ EOF
   $DC -f "$COMPOSE_APP_FILE" -p "${PROJECT_NAME}_app_stack" up -d --build
 
   # ── Import dump ──────────────────────────────────────────────────────────
+  IS_EMPTY_DB=0
+  TABLE_COUNT=$(docker exec -i "$CENTRAL_DB_CONTAINER" mysql -uroot -p"$CENTRAL_DB_ROOT_PASS" -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME';" -sN 2>/dev/null || echo "0")
+  if [[ "${TABLE_COUNT:-0}" -eq 0 ]]; then
+    IS_EMPTY_DB=1
+  fi
+
   SHOULD_IMPORT=0
-  [[ $SKIP_IMPORT -eq 0 ]] && { [[ $FRESH_DEPLOY -eq 1 || $FORCE_IMPORT -eq 1 || -n "$DUMP_FILE" ]] && SHOULD_IMPORT=1; }
+  [[ $SKIP_IMPORT -eq 0 ]] && { [[ $FRESH_DEPLOY -eq 1 || $FORCE_IMPORT -eq 1 || $IS_EMPTY_DB -eq 1 || -n "$DUMP_FILE" ]] && SHOULD_IMPORT=1; }
 
   if [[ $SHOULD_IMPORT -eq 1 ]]; then
-    log "Mencari & mengimpor dump database (.sql) jika ada ke DB Sentral..."
+    if [[ $IS_EMPTY_DB -eq 1 && $FRESH_DEPLOY -eq 0 && $FORCE_IMPORT -eq 0 && -z "$DUMP_FILE" ]]; then
+      log "Database '$DB_NAME' terdeteksi kosong (0 tabel), otomatis mengimpor dump database..."
+    else
+      log "Mencari & mengimpor dump database (.sql) jika ada ke DB Sentral..."
+    fi
     DUMP_ARGS=(
       --project-path "$PROJECT_PATH"
       --project-name "$PROJECT_NAME"
@@ -369,7 +379,7 @@ EOF
     [[ -n "$DUMP_FILE" ]] && DUMP_ARGS+=(--dump "$DUMP_FILE")
     python3 "$SCRIPTS_DIR/db_import.py" "${DUMP_ARGS[@]}"
   else
-    log "Lewati import dump (bukan deploy pertama; pakai --force-import untuk paksa)."
+    log "Lewati import dump (bukan deploy pertama & database tidak kosong; pakai --force-import untuk paksa)."
   fi
 
   # ── Setup PHP / Laravel ───────────────────────────────────────────────────
@@ -709,8 +719,14 @@ for svc_name in "${SVC_NAMES[@]}"; do
     [[ "$fd" == "$svc_name" ]] && IS_FRESH=1 && break
   done
 
+  IS_EMPTY_DB=0
+  TABLE_COUNT=$($DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" exec -T "db_${svc_name}" mysql -uroot -p"$DB_ROOT_PASS" -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$db_name';" -sN 2>/dev/null || echo "0")
+  if [[ "${TABLE_COUNT:-0}" -eq 0 ]]; then
+    IS_EMPTY_DB=1
+  fi
+
   SHOULD_IMPORT=0
-  [[ $SKIP_IMPORT -eq 0 ]] && { [[ $IS_FRESH -eq 1 || $FORCE_IMPORT -eq 1 ]] && SHOULD_IMPORT=1; }
+  [[ $SKIP_IMPORT -eq 0 ]] && { [[ $IS_FRESH -eq 1 || $FORCE_IMPORT -eq 1 || $IS_EMPTY_DB -eq 1 ]] && SHOULD_IMPORT=1; }
 
   if [[ $SHOULD_IMPORT -eq 1 ]]; then
     log "[$svc_name] Mencari & mengimpor dump database..."
@@ -723,7 +739,7 @@ for svc_name in "${SVC_NAMES[@]}"; do
       --db-root-pass "$DB_ROOT_PASS" \
       --dc           "$DC"
   else
-    log "[$svc_name] Lewati import dump."
+    log "[$svc_name] Lewati import dump (database tidak kosong)."
   fi
 
   # Setup Laravel
