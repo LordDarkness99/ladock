@@ -242,21 +242,24 @@ DB_ROOT_PASS=$DB_ROOT_PASS
 EOF
   fi
 
+  # ── Memastikan DB Sentral Aktif ──────────────────────────────────────────
+  "$SCRIPT_DIR/central_db.sh" start
+
+  source "$SCRIPT_DIR/.ladock_db.env"
+  CENTRAL_DB_CONTAINER="${LADOCK_DB_CONTAINER:-ladock_mysql}"
+  CENTRAL_DB_PORT="${LADOCK_DB_PORT:-3308}"
+  CENTRAL_DB_ROOT_PASS="${LADOCK_DB_ROOT_PASS:-3baa6e5d124af02611fd0efb79ae292d}"
+
+  # Override DB_PORT ke Central DB Port untuk konsistensi tampilan
+  DB_PORT="$CENTRAL_DB_PORT"
+
   # ── Render template ──────────────────────────────────────────────────────
-  log "Menyiapkan file Docker (Dockerfile, apache-vhost.conf, .docker-compose-db.yml, .docker-compose-app.yml)..."
+  log "Menyiapkan file Docker (Dockerfile, apache-vhost.conf, .docker-compose-app.yml)..."
   rm -rf "$DOCKER_DIR/Dockerfile" "$DOCKER_DIR/apache-vhost.conf"
   cp "$TEMPLATE_DIR/Dockerfile" "$DOCKER_DIR/Dockerfile"
 
   sed -e "s/__PROJECT__/$PROJECT_NAME/g" \
       "$TEMPLATE_DIR/apache-vhost.conf.tpl" > "$DOCKER_DIR/apache-vhost.conf"
-
-  sed -e "s/__PROJECT__/$PROJECT_NAME/g" \
-      -e "s/__DB_PORT__/$DB_PORT/g" \
-      -e "s/__DB_NAME__/$DB_NAME/g" \
-      -e "s/__DB_USER__/$DB_USER/g" \
-      -e "s/__DB_PASS__/$DB_PASS/g" \
-      -e "s/__DB_ROOT_PASS__/$DB_ROOT_PASS/g" \
-      "$TEMPLATE_DIR/docker-compose-db.yml.tpl" > "$COMPOSE_DB_FILE"
 
   sed -e "s/__PROJECT__/$PROJECT_NAME/g" \
       -e "s/__HTTP_PORT__/$HTTP_PORT/g" \
@@ -267,8 +270,8 @@ EOF
       -e "s/__COMPOSER_VERSION__/$COMPOSER_VERSION/g" \
       "$TEMPLATE_DIR/docker-compose-app.yml.tpl" > "$COMPOSE_APP_FILE"
 
-  # Hapus file compose lama jika ada
-  rm -f "$PROJECT_PATH/.docker-compose.yml"
+  # Hapus file compose lama/db jika ada
+  rm -f "$PROJECT_PATH/.docker-compose.yml" "$COMPOSE_DB_FILE"
 
   # ── .env Laravel ────────────────────────────────────────────────────────
   cd "$PROJECT_PATH"
@@ -286,7 +289,7 @@ EOF
   }
 
   set_env "DB_CONNECTION" "mysql"
-  set_env "DB_HOST"       "db_${PROJECT_NAME}"
+  set_env "DB_HOST"       "$CENTRAL_DB_CONTAINER"
   set_env "DB_PORT"       "3306"
   set_env "DB_DATABASE"   "$DB_NAME"
   set_env "DB_USERNAME"   "$DB_USER"
@@ -300,23 +303,17 @@ EOF
     esac
   done
 
-  # ── Down lama → Build → Up ───────────────────────────────────────────────
-  log "Membersihkan container lama project ini (jika ada)..."
+  # ── Buat Database & User di DB Sentral ──────────────────────────────────
+  log "Memastikan Database '$DB_NAME' & User '$DB_USER' di DB Sentral..."
+  docker exec -i "$CENTRAL_DB_CONTAINER" mysql -uroot -p"$CENTRAL_DB_ROOT_PASS" -e "
+    CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    CREATE USER IF NOT EXISTS '${DB_USER}'@'%' IDENTIFIED BY '${DB_PASS}';
+    GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'%';
+    FLUSH PRIVILEGES;
+  " >/dev/null 2>&1
+
+  log "Membersihkan container App lama project ini (jika ada)..."
   $DC -f "$COMPOSE_APP_FILE" -p "${PROJECT_NAME}_app_stack" down --remove-orphans >/dev/null 2>&1 || true
-  $DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" down --remove-orphans >/dev/null 2>&1 || true
-
-  log "Menjalankan container Database..."
-  $DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" up -d
-
-  # ── Tunggu MySQL ─────────────────────────────────────────────────────────
-  log "Menunggu MySQL siap (hingga 90 detik)..."
-  timeout=90; elapsed=0
-  until $DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" exec -T "db_${PROJECT_NAME}" \
-        mysql -uroot -p"$DB_ROOT_PASS" -e "SELECT 1" >/dev/null 2>&1; do
-    [[ $elapsed -ge $timeout ]] && echo "MySQL tidak siap setelah $timeout detik." && exit 1
-    sleep 2; elapsed=$((elapsed+2)); info "... menunggu ($elapsed/${timeout}s)"
-  done
-  echo "MySQL siap!"
 
   log "Build image & menjalankan container App..."
   $DC -f "$COMPOSE_APP_FILE" -p "${PROJECT_NAME}_app_stack" up -d --build
@@ -326,15 +323,14 @@ EOF
   [[ $SKIP_IMPORT -eq 0 ]] && { [[ $FRESH_DEPLOY -eq 1 || $FORCE_IMPORT -eq 1 || -n "$DUMP_FILE" ]] && SHOULD_IMPORT=1; }
 
   if [[ $SHOULD_IMPORT -eq 1 ]]; then
-    log "Mencari & mengimpor dump database (.sql) jika ada..."
+    log "Mencari & mengimpor dump database (.sql) jika ada ke DB Sentral..."
     DUMP_ARGS=(
       --project-path "$PROJECT_PATH"
       --project-name "$PROJECT_NAME"
-      --compose-file "$COMPOSE_DB_FILE"
-      --compose-project-name "${PROJECT_NAME}_db_stack"
       --db-name      "$DB_NAME"
-      --db-root-pass "$DB_ROOT_PASS"
-      --dc           "$DC"
+      --db-root-pass "$CENTRAL_DB_ROOT_PASS"
+      --db-container "$CENTRAL_DB_CONTAINER"
+      --central-db
     )
     [[ -n "$DUMP_FILE" ]] && DUMP_ARGS+=(--dump "$DUMP_FILE")
     python3 "$SCRIPTS_DIR/db_import.py" "${DUMP_ARGS[@]}"
@@ -369,7 +365,7 @@ EOF
   hr
   echo " SELESAI — Laravel project '$PROJECT_NAME' sudah live"
   echo " Akses Web   : http://localhost:$HTTP_PORT"
-  echo " MySQL       : localhost:$DB_PORT"
+  echo " DB Sentral  : localhost:$CENTRAL_DB_PORT (Container: $CENTRAL_DB_CONTAINER)"
   echo "   DB Name   : $DB_NAME"
   echo "   DB User   : $DB_USER"
   echo "   DB Pass   : $DB_PASS"

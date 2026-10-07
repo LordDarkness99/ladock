@@ -43,21 +43,18 @@ if [[ ! -f "$COMPOSE_DB_FILE" && ! -f "$COMPOSE_APP_FILE" && ! -f "$OLD_COMPOSE_
   exit 1
 fi
 
-echo "--> Menghentikan & menghapus container + volume DB project '$PROJECT_NAME'..."
+echo "--> Menghentikan container project '$PROJECT_NAME'..."
 cd "$PROJECT_PATH"
 
 if [[ -f "$COMPOSE_APP_FILE" ]]; then
   $DC -f "$COMPOSE_APP_FILE" -p "${PROJECT_NAME}_app_stack" down --remove-orphans >/dev/null 2>&1 || true
 fi
 if [[ -f "$COMPOSE_DB_FILE" ]]; then
-  $DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" down -v --remove-orphans >/dev/null 2>&1 || true
+  $DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" down --remove-orphans >/dev/null 2>&1 || true
 fi
 if [[ -f "$OLD_COMPOSE_FILE" ]]; then
-  $DC -f "$OLD_COMPOSE_FILE" -p "$PROJECT_NAME" down -v --remove-orphans >/dev/null 2>&1 || true
+  $DC -f "$OLD_COMPOSE_FILE" -p "$PROJECT_NAME" down --remove-orphans >/dev/null 2>&1 || true
 fi
-
-# Menghapus network jika ada
-docker network rm "${PROJECT_NAME}_net" >/dev/null 2>&1 || true
 
 if [[ $WITH_IMAGES -eq 1 ]]; then
   echo "--> Menghapus image terkait project ini..."

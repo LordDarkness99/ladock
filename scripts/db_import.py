@@ -41,10 +41,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--project-path", required=True)
     ap.add_argument("--project-name", required=True)
-    ap.add_argument("--compose-file", required=True)
+    ap.add_argument("--compose-file", default="")
     ap.add_argument("--compose-project-name", default=None)
     ap.add_argument("--db-name", required=True)
     ap.add_argument("--db-root-pass", required=True)
+    ap.add_argument("--db-container", default=None, help="Nama container DB")
+    ap.add_argument("--central-db", action="store_true", help="Gunakan docker exec langsung ke DB central")
     ap.add_argument("--dump", default=None, help="Path eksplisit ke file .sql (opsional, kalau tidak diisi akan dicari otomatis)")
     ap.add_argument("--dc", default="docker compose", help="Perintah compose yang dipakai, mis. 'docker compose' atau 'docker-compose'")
     args = ap.parse_args()
@@ -70,14 +72,18 @@ def main():
 
     print(f"-> Mengimpor '{os.path.basename(dump_path)}' ke database '{args.db_name}' ...")
 
-    db_service = f"db_{args.project_name}"
-    project_name_flag = args.compose_project_name if args.compose_project_name else args.project_name
-    dc_cmd = args.dc.split() + [
-        "-f", args.compose_file,
-        "-p", project_name_flag,
-        "exec", "-T", db_service,
-        "mysql", "-uroot", f"-p{args.db_root_pass}", args.db_name,
-    ]
+    db_container = args.db_container if getattr(args, 'db_container', None) else f"db_{args.project_name}"
+    
+    if getattr(args, 'central_db', False):
+        dc_cmd = ["docker", "exec", "-i", db_container, "mysql", "-uroot", f"-p{args.db_root_pass}", args.db_name]
+    else:
+        project_name_flag = args.compose_project_name if args.compose_project_name else args.project_name
+        dc_cmd = args.dc.split() + [
+            "-f", args.compose_file,
+            "-p", project_name_flag,
+            "exec", "-T", db_container,
+            "mysql", "-uroot", f"-p{args.db_root_pass}", args.db_name,
+        ]
 
     try:
         with open(dump_path, "rb") as dump_file:

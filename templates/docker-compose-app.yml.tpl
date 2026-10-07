@@ -17,15 +17,15 @@ services:
     environment:
       APP_ENV: "local"
       DB_CONNECTION: "mysql"
-      DB_HOST: "db___PROJECT__"
+      DB_HOST: "ladock_mysql"
       DB_PORT: "3306"
       DB_DATABASE: "__DB_NAME__"
       DB_USERNAME: "__DB_USER__"
       DB_PASSWORD: "__DB_PASS__"
     networks:
-      - __PROJECT___net
+      - ladock_net
 
 networks:
-  __PROJECT___net:
-    name: __PROJECT___net
+  ladock_net:
+    name: ladock_net
     external: true
