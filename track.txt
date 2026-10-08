@@ -13,7 +13,7 @@ mysql -h 127.0.0.1 -P 3307 -u travel_agency_admin__user -p
 ./deploy.sh /home/nizar/Documents/summy/uji/event-management-system-main
 ./destroy.sh /home/nizar/Documents/summy/uji/event-management-system-main
 
-./deploy.sh /home/nizar/Documents/summy/uji/Student-Event-Management-Web-Application-main 8085 3308
+./deploy.sh /home/nizar/Documents/summy/uji/Student-Event-Management-Web-Application-main 8086 3308
 ./destroy.sh /home/nizar/Documents/summy/uji/Student-Event-Management-Web-Application-main
 
 ./deploy.sh /home/nizar/Documents/summy/uji/vaahcms

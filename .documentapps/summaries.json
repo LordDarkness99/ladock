@@ -1,4 +1,7 @@
 {
+  ".ladock_db.env": {
+    "summary": "Konfigurasi environment MySQL sentral LaDock (nama container, port, password root, dan network Docker)."
+  },
   "README.md": {
     "summary": "Dokumentasi LaDock, alat otomasi deployment aplikasi Laravel ke Docker dalam mode monolith maupun microservices, termasuk cara instalasi, penggunaan, monitoring, dan struktur repository."
   },
@@ -14,17 +17,17 @@
   "monitor.sh": {
     "summary": "Launcher dashboard monitoring LaDock untuk menjalankan, memeriksa status, dan menghentikan server web monitor pada port yang ditentukan."
   },
-  "monitor/server.py": {
-    "summary": "Server HTTP Python multithreaded untuk dashboard LaDock; menyediakan data status container Docker, statistik CPU/RAM, probe port, log, dan aksi kontrol container."
+  "monitor/public/app.js": {
+    "summary": "Logika frontend dashboard LaDock Monitor untuk mengambil data server, memperbarui status dan statistik, memfilter project/container, menampilkan log, dan menjalankan shortcut aksi."
   },
   "monitor/public/index.html": {
     "summary": "Kerangka dashboard LaDock Monitor berbahasa Indonesia dengan ringkasan project dan resource, filter, shortcut layanan, daftar deployment, serta modal log dan perintah CLI."
   },
-  "monitor/public/app.js": {
-    "summary": "Logika frontend dashboard LaDock Monitor untuk mengambil data server, memperbarui status dan statistik, memfilter project/container, menampilkan log, dan menjalankan shortcut aksi."
-  },
   "monitor/public/style.css": {
     "summary": "Gaya visual responsif untuk dashboard LaDock Monitor, termasuk navigasi, kartu statistik, daftar project, kontrol, modal, status, dan notifikasi."
+  },
+  "monitor/server.py": {
+    "summary": "Server HTTP Python multithreaded untuk dashboard LaDock; menyediakan data status container Docker, statistik CPU/RAM, probe port, log, dan aksi kontrol container."
   },
   "scripts/db_import.py": {
     "summary": "Utilitas untuk menemukan dump SQL di project Laravel atau menerima path dump eksplisit, lalu mengimpor dump ke container database MySQL (termasuk DB sentral)."
@@ -47,6 +50,9 @@
   "scripts/generate_gateway_conf.py": {
     "summary": "Menghasilkan konfigurasi Apache API Gateway yang merutekan prefix URL ke container service microservices dan menyajikan halaman discovery pada root."
   },
+  "templates/.dockerignore": {
+    "summary": "Daftar file dan folder yang diabaikan saat membangun Docker image aplikasi Laravel (seperti node_modules, vendor, file dump SQL, dan arsip)."
+  },
   "templates/Dockerfile": {
     "summary": "Template image aplikasi Laravel berbasis PHP dan Apache, termasuk ekstensi/runtime yang dibutuhkan untuk menjalankan tiap service."
   },
@@ -59,11 +65,11 @@
   "templates/docker-compose-db.yml.tpl": {
     "summary": "Template Docker Compose untuk container MySQL database deployment LaDock beserta environment dan penyimpanan datanya."
   },
-  "templates/gateway.Dockerfile": {
-    "summary": "Dockerfile untuk membangun image Apache httpd sebagai API Gateway bagi deployment microservices."
-  },
   "templates/gateway-httpd.conf": {
     "summary": "Konfigurasi dasar Apache httpd untuk container gateway, mengaktifkan modul dan pengaturan yang diperlukan untuk reverse proxy."
+  },
+  "templates/gateway.Dockerfile": {
+    "summary": "Dockerfile untuk membangun image Apache httpd sebagai API Gateway bagi deployment microservices."
   },
   "track.txt": {
     "summary": "Catatan command dan contoh path deployment lokal, koneksi MySQL, serta penggunaan dashboard monitoring LaDock."
