@@ -32,8 +32,15 @@ def find_dump_files(project_path: str):
         for fn in filenames:
             if fn.lower().endswith(".sql"):
                 candidates.append(os.path.join(dirpath, fn))
-    # asumsi: dump paling besar = paling lengkap datanya
-    candidates.sort(key=lambda p: os.path.getsize(p), reverse=True)
+    
+    # Priority sorting: files with 'structure', 'schema', 'create', 'init' come first, then others sorted by size
+    def sort_key(p):
+        fn = os.path.basename(p).lower()
+        if any(kw in fn for kw in ["structure", "schema", "init", "create"]):
+            return (0, fn)
+        return (1, -os.path.getsize(p))
+
+    candidates.sort(key=sort_key)
     return candidates
 
 
@@ -51,26 +58,24 @@ def main():
     ap.add_argument("--dc", default="docker compose", help="Perintah compose yang dipakai, mis. 'docker compose' atau 'docker-compose'")
     args = ap.parse_args()
 
+    dump_files = []
     if args.dump:
         dump_path = os.path.abspath(args.dump)
         if not os.path.isfile(dump_path):
             print(f"File dump tidak ditemukan: {dump_path}", file=sys.stderr)
             sys.exit(1)
+        dump_files.append(dump_path)
     else:
         found = find_dump_files(args.project_path)
         if not found:
             print("Tidak ada file .sql ditemukan di dalam project, lewati import data.")
             sys.exit(0)
+        dump_files = found
         if len(found) > 1:
-            print("Ditemukan beberapa file .sql di dalam project:")
+            print("Ditemukan beberapa file .sql di dalam project, mengimpor secara berurutan:")
             for f in found:
                 size_mb = os.path.getsize(f) / (1024 * 1024)
                 print(f"  - {f} ({size_mb:.1f} MB)")
-            print(f"-> Memakai yang paling besar (asumsi paling lengkap): {found[0]}")
-            print("   (kalau salah, jalankan ulang dengan --dump /path/file.sql yang benar)")
-        dump_path = found[0]
-
-    print(f"-> Mengimpor '{os.path.basename(dump_path)}' ke database '{args.db_name}' ...")
 
     db_container = args.db_container if getattr(args, 'db_container', None) else f"db_{args.project_name}"
     
@@ -86,22 +91,23 @@ def main():
         ]
 
     import re
-    try:
-        with open(dump_path, "r", encoding="utf-8", errors="ignore") as f:
-            content = f.read()
-        content = re.sub(r'(?i)CREATE\s+DATABASE\s+[^;]+;', '', content)
-        content = re.sub(r'(?i)DROP\s+DATABASE\s+[^;]+;', '', content)
-        content = re.sub(r'(?i)USE\s+[^;]+;', '', content)
+    for dump_path in dump_files:
+        print(f"-> Mengimpor '{os.path.basename(dump_path)}' ke database '{args.db_name}' ...")
+        try:
+            with open(dump_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            content = re.sub(r'(?i)CREATE\s+DATABASE\s+[^;]+;', '', content)
+            content = re.sub(r'(?i)DROP\s+DATABASE\s+[^;]+;', '', content)
+            content = re.sub(r'(?i)USE\s+[^;]+;', '', content)
 
-        sql_input = f"USE `{args.db_name}`;\nSET FOREIGN_KEY_CHECKS=0;\n{content}\nSET FOREIGN_KEY_CHECKS=1;\n".encode("utf-8")
-        result = subprocess.run(dc_cmd, input=sql_input)
-    except FileNotFoundError:
-        print(f"Perintah '{args.dc}' tidak ditemukan.", file=sys.stderr)
-        sys.exit(1)
+            sql_input = f"USE `{args.db_name}`;\nSET FOREIGN_KEY_CHECKS=0;\n{content}\nSET FOREIGN_KEY_CHECKS=1;\n".encode("utf-8")
+            result = subprocess.run(dc_cmd, input=sql_input)
+        except FileNotFoundError:
+            print(f"Perintah '{args.dc}' tidak ditemukan.", file=sys.stderr)
+            sys.exit(1)
 
-    if result.returncode != 0:
-        print("Import database gagal (lihat error di atas).", file=sys.stderr)
-        sys.exit(result.returncode)
+        if result.returncode != 0:
+            print(f"Import database '{os.path.basename(dump_path)}' gagal.", file=sys.stderr)
 
     print("Import database selesai.")
 
