@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LaDock Monitoring & Control Center</title>
+  <title>LaDock Control Center & Monitoring</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -17,195 +17,370 @@
         <div class="brand">
           <div class="brand-icon">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
-              <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
-              <line x1="6" y1="6" x2="6.01" y2="6"></line>
-              <line x1="6" y1="18" x2="6.01" y2="18"></line>
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
             </svg>
           </div>
           <div class="brand-text">
-            <div class="brand-title">LaDock Monitor</div>
-            <div class="brand-sub">Microservice & Monolith Control Center</div>
+            <div class="brand-title">LaDock Control Center</div>
+            <div class="brand-sub">cPanel Migration & Automation v3.0</div>
           </div>
         </div>
         <div class="status-indicator-pill" id="global-status-pill">
           <span class="status-dot pulsing"></span>
-          <span id="global-status-text">Memuat status cluster...</span>
+          <span id="global-status-text">Memuat status...</span>
         </div>
       </div>
 
+      <!-- Navigation Tabs -->
+      <nav class="nav-tabs">
+        <button class="nav-tab active" data-tab="tab-overview">📊 Overview</button>
+        <button class="nav-tab" data-tab="tab-deploy">🚀 Deploy Hub</button>
+        <button class="nav-tab" data-tab="tab-apps">📦 Aplikasi</button>
+        <button class="nav-tab" data-tab="tab-database">🗄️ DB Sentral</button>
+        <button class="nav-tab" data-tab="tab-config">⚙️ Konfigurasi</button>
+        <button class="nav-tab" data-tab="tab-logs">📜 Logs & Riwayat</button>
+      </nav>
+
       <div class="topbar-right">
-        <!-- Search & Filter -->
-        <div class="search-box">
-          <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        <button id="btn-manual-refresh" class="btn-icon" title="Refresh Sekarang">
+          <svg id="refresh-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
           </svg>
-          <input type="text" id="filter-input" placeholder="Cari project, container, port..." autocomplete="off">
-        </div>
-
-        <!-- Mode filter buttons -->
-        <div class="segmented-control">
-          <button class="seg-btn active" data-filter="all">Semua</button>
-          <button class="seg-btn" data-filter="microservices">Microservices</button>
-          <button class="seg-btn" data-filter="monolith">Monolith</button>
-        </div>
-
-        <!-- Auto refresh selector -->
-        <div class="refresh-controls">
-          <select id="refresh-interval-select" class="dropdown-select" title="Interval Auto Refresh">
-            <option value="2000">Auto: 2 Detik</option>
-            <option value="5000" selected>Auto: 5 Detik</option>
-            <option value="10000">Auto: 10 Detik</option>
-            <option value="0">Jeda (Manual)</option>
-          </select>
-          <button id="btn-manual-refresh" class="btn-icon" title="Refresh Sekarang">
-            <svg id="refresh-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
-            </svg>
-          </button>
-        </div>
+        </button>
       </div>
     </header>
 
     <!-- Main Content Area -->
     <main class="main-container">
-      <!-- Global Summary Cards -->
-      <section class="summary-grid" id="summary-section">
-        <div class="stat-card">
-          <div class="stat-header">
-            <span class="stat-label">Total Projects</span>
-            <span class="stat-badge project-badge">Active</span>
+
+      <!-- ==================== TAB 1: OVERVIEW ==================== -->
+      <div class="tab-pane active" id="tab-overview">
+        <!-- Database Sentral Banner -->
+        <section class="central-db-banner" id="central-db-card">
+          <div class="db-banner-content">
+            <div class="db-banner-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+              </svg>
+            </div>
+            <div class="db-banner-details">
+              <div class="db-banner-title">
+                <span>Database MySQL Sentral:</span>
+                <span class="badge" id="central-db-badge">Checking...</span>
+              </div>
+              <div class="db-banner-meta">
+                <span>Container: <strong id="cdb-name">ladock_mysql</strong></span> •
+                <span>Port Host: <strong id="cdb-port">3308</strong></span> •
+                <span>Network: <strong id="cdb-net">ladock_net</strong></span> •
+                <span>Volume Data: <strong id="cdb-vol">ladock_db_central_data</strong> (Docker Named Volume)</span>
+              </div>
+            </div>
           </div>
-          <div class="stat-value" id="stat-total-projects">-</div>
-          <div class="stat-footer">
-            <span id="stat-micro-count">0 Microservice</span> • <span id="stat-mono-count">0 Monolith</span>
+          <div class="db-banner-actions">
+            <button class="btn btn-sm btn-outline" onclick="switchTab('tab-database')">Kelola Database & Backup</button>
+          </div>
+        </section>
+
+        <!-- Summary Cards -->
+        <section class="summary-grid">
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Total Projects</span>
+              <span class="stat-badge project-badge">Deployed</span>
+            </div>
+            <div class="stat-value" id="stat-total-projects">0</div>
+            <div class="stat-footer" id="stat-project-breakdown">-</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Total Containers</span>
+              <span class="stat-badge running-badge" id="stat-badge-running">Live</span>
+            </div>
+            <div class="stat-value" id="stat-total-containers">0</div>
+            <div class="stat-footer">
+              <span class="text-success" id="stat-running-count">0 aktif</span> •
+              <span class="text-danger" id="stat-stopped-count">0 berhenti</span>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Cluster CPU Load</span>
+              <span class="stat-badge neutral-badge">Realtime</span>
+            </div>
+            <div class="stat-value" id="stat-avg-cpu">0.0%</div>
+            <div class="stat-footer">
+              <div class="stat-progress-bar">
+                <div class="stat-progress-fill" id="stat-cpu-bar" style="width: 0%;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Cluster RAM Usage</span>
+              <span class="stat-badge memory-badge">Realtime</span>
+            </div>
+            <div class="stat-value" id="stat-total-mem">0 MB</div>
+            <div class="stat-footer" id="stat-mem-detail">Memuat pemakaian RAM...</div>
+          </div>
+        </section>
+
+        <!-- Quick Access Shortcuts -->
+        <section class="shortcuts-strip">
+          <div class="strip-label">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+            </svg>
+            <span>Akses Web Service:</span>
+          </div>
+          <div class="strip-items" id="quick-links-container"></div>
+        </section>
+
+        <!-- Container Grid -->
+        <section class="section-card">
+          <div class="section-header">
+            <h2 class="section-title">Status Container Docker</h2>
+            <div class="search-box">
+              <input type="text" id="filter-container-input" placeholder="Filter container...">
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="containers-table">
+              <thead>
+                <tr>
+                  <th>Container</th>
+                  <th>Image</th>
+                  <th>Status</th>
+                  <th>Port Mapping</th>
+                  <th>CPU / RAM</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="containers-tbody">
+                <tr><td colspan="6" class="text-center">Memuat daftar container...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- ==================== TAB 2: DEPLOY HUB ==================== -->
+      <div class="tab-pane" id="tab-deploy">
+        <div class="grid-2col">
+          <!-- Form Deploy -->
+          <div class="section-card">
+            <h2 class="section-title">🚀 Jalankan Deployment Otomatis</h2>
+            <p class="section-desc">Mendukung file arsip (.zip, .tar.gz, cpmove) atau path folder aplikasi langsung.</p>
+
+            <form id="deploy-form" onsubmit="handleDeploySubmit(event)">
+              <!-- Upload Arsip Box -->
+              <div class="upload-dropzone" id="dropzone" onclick="document.getElementById('archive-file-input').click()">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <div class="dropzone-text">
+                  <strong>Klik untuk upload</strong> arsip <code>.zip</code>, <code>.tar.gz</code>, atau <code>cpmove</code>
+                </div>
+                <div class="dropzone-sub" id="upload-status-text">Proteksi Zip-Slip & Corrupt Check diaktifkan</div>
+                <input type="file" id="archive-file-input" style="display: none;" accept=".zip,.tar.gz,.tgz,.tar" onchange="handleFileUpload(event)">
+              </div>
+
+              <div class="form-group">
+                <label>File Arsip yang Diupload (Path di Server):</label>
+                <input type="text" id="deploy-archive-path" placeholder="/path/ke/archive.zip">
+              </div>
+
+              <div class="form-divider"><span>ATAU</span></div>
+
+              <div class="form-group">
+                <label>Path Folder Project Lokal:</label>
+                <input type="text" id="deploy-project-path" placeholder="/home/nizar/Documents/.../app-folder">
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label>HTTP Port:</label>
+                  <input type="number" id="deploy-http-port" value="8080">
+                </div>
+                <div class="form-group">
+                  <label>MySQL Port (Sentral):</label>
+                  <input type="number" id="deploy-db-port" value="3308">
+                </div>
+                <div class="form-group">
+                  <label>PHP Versi (Opsional):</label>
+                  <input type="text" id="deploy-php-ver" placeholder="Auto-detect">
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Mode:</label>
+                  <select id="deploy-mode">
+                    <option value="">Auto (Monolith / Microservices)</option>
+                    <option value="monolith">Monolith (Clean Structure)</option>
+                    <option value="microservice">Microservices</option>
+                  </select>
+                </div>
+                <div class="form-group checkbox-group">
+                  <label><input type="checkbox" id="deploy-force-import"> Paksa Import SQL Dump</label>
+                  <label><input type="checkbox" id="deploy-skip-import"> Lewati Import SQL</label>
+                </div>
+              </div>
+
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary btn-block" id="btn-submit-deploy">
+                  <span>Mulai Deploy Sekarang</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- Live Terminal Output -->
+          <div class="section-card terminal-card">
+            <div class="terminal-header">
+              <div class="terminal-title">
+                <span class="terminal-dot red"></span>
+                <span class="terminal-dot yellow"></span>
+                <span class="terminal-dot green"></span>
+                <span>Live Deployment Terminal Output (SSE)</span>
+              </div>
+              <button class="btn-sm btn-ghost" onclick="clearDeployLogs()">Bersihkan</button>
+            </div>
+            <pre class="terminal-window" id="deploy-live-terminal">Menunggu eksekusi deployment...</pre>
           </div>
         </div>
+      </div>
 
-        <div class="stat-card">
-          <div class="stat-header">
-            <span class="stat-label">Total Containers</span>
-            <span class="stat-badge running-badge" id="stat-badge-running">0 Running</span>
+      <!-- ==================== TAB 3: DAFTAR APLIKASI ==================== -->
+      <div class="tab-pane" id="tab-apps">
+        <section class="section-card">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Daftar Aplikasi Hasil Deployment</h2>
+              <p class="section-desc">Setiap aplikasi tertata rapi dalam struktur: <code>&lt;app&gt;/src/</code>, <code>docker-compose.yml</code>, <code>Dockerfile</code>, <code>stack.json</code>, dan <code>logs/</code>.</p>
+            </div>
+            <button class="btn btn-sm btn-outline" onclick="loadDeployedApps()">Refresh Apps</button>
           </div>
-          <div class="stat-value" id="stat-total-containers">-</div>
-          <div class="stat-footer">
-            <span class="text-success" id="stat-running-count">0 aktif</span> • <span class="text-danger" id="stat-stopped-count">0 berhenti</span>
+          <div class="apps-grid" id="apps-container">
+            <div class="loading-spinner">Memuat daftar aplikasi...</div>
           </div>
-        </div>
+        </section>
+      </div>
 
-        <div class="stat-card">
-          <div class="stat-header">
-            <span class="stat-label">Cluster CPU Load</span>
-            <span class="stat-badge neutral-badge">Live</span>
+      <!-- ==================== TAB 4: DATABASE SENTRAL ==================== -->
+      <div class="tab-pane" id="tab-database">
+        <div class="grid-2col">
+          <!-- Central DB Info & Actions -->
+          <div class="section-card">
+            <h2 class="section-title">🗄️ Manajemen Database Sentral (MySQL 8.0)</h2>
+            <div class="info-alert">
+              <strong>Info Volume Docker:</strong> Data fisik database disimpan secara aman di Docker Named Volume <code>ladock_db_central_data</code> untuk performa I/O maksimal dan keamanan InnoDB. Seluruh dump SQL diekspor dan diorganisir secara rapi di <code>mysql/db/&lt;app_name&gt;/</code>.
+            </div>
+
+            <div class="db-actions-box">
+              <h3>Backup Database Aplikasi ke <code>mysql/db/&lt;app&gt;/</code></h3>
+              <div class="form-row">
+                <input type="text" id="backup-app-name" placeholder="Nama aplikasi (contoh: campuscare)">
+                <button class="btn btn-primary" onclick="triggerDbBackup()">Dump Database</button>
+              </div>
+            </div>
+
+            <div class="db-actions-box" style="margin-top: 1.5rem;">
+              <h3>Restore Database dari <code>mysql/db/&lt;app&gt;/data.sql</code></h3>
+              <div class="form-row">
+                <input type="text" id="restore-app-name" placeholder="Nama aplikasi">
+                <button class="btn btn-warning" onclick="triggerDbRestore()">Restore Database</button>
+              </div>
+            </div>
           </div>
-          <div class="stat-value" id="stat-avg-cpu">0.0%</div>
-          <div class="stat-footer">
-            <div class="stat-progress-bar">
-              <div class="stat-progress-fill" id="stat-cpu-bar" style="width: 0%;"></div>
+
+          <!-- List Backup Files -->
+          <div class="section-card">
+            <h2 class="section-title">Daftar Folder Backup (<code>mysql/db/</code>)</h2>
+            <div id="db-folders-list" class="db-files-tree">
+              <div class="loading-spinner">Memuat berkas backup...</div>
             </div>
           </div>
         </div>
+      </div>
 
-        <div class="stat-card">
-          <div class="stat-header">
-            <span class="stat-label">Total Memory Usage</span>
-            <span class="stat-badge memory-badge">Live</span>
+      <!-- ==================== TAB 5: KONFIGURASI ==================== -->
+      <div class="tab-pane" id="tab-config">
+        <div class="grid-2col">
+          <div class="section-card">
+            <div class="section-header">
+              <h2 class="section-title">config.json</h2>
+              <button class="btn btn-sm btn-primary" onclick="saveConfig()">Simpan config.json</button>
+            </div>
+            <textarea class="code-editor" id="config-json-editor" rows="18"></textarea>
           </div>
-          <div class="stat-value" id="stat-total-mem">-</div>
-          <div class="stat-footer" id="stat-mem-detail">
-            Memuat penggunaan RAM...
-          </div>
-        </div>
-      </section>
 
-      <!-- Fast Access Shortcuts Strip -->
-      <section class="shortcuts-strip" id="shortcuts-strip">
-        <div class="strip-label">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-          </svg>
-          <span>Akses Cepat Layanan Web:</span>
-        </div>
-        <div class="strip-items" id="quick-links-container">
-          <!-- Populated dynamically -->
-        </div>
-      </section>
+          <div class="section-card">
+            <div class="section-header">
+              <h2 class="section-title">.ladock_db.env & Summaries</h2>
+              <button class="btn btn-sm btn-primary" onclick="saveEnv()">Simpan .env</button>
+            </div>
+            <label class="form-label">Konfigurasi Environment DB Sentral (.ladock_db.env):</label>
+            <textarea class="code-editor" id="env-editor" rows="7"></textarea>
 
-      <!-- Projects Section -->
-      <section class="projects-section">
-        <div class="section-header">
-          <h2 class="section-title">Daftar Project Ter-deploy</h2>
-          <span class="last-updated" id="last-updated-text">Diperbarui: -</span>
-        </div>
-
-        <div class="projects-list" id="projects-container">
-          <!-- Loading skeleton -->
-          <div class="project-skeleton">
-            <div class="skeleton-line full"></div>
-            <div class="skeleton-line half"></div>
-            <div class="skeleton-box"></div>
+            <label class="form-label" style="margin-top: 1rem;">Ringkasan Komponen (.documentapps/summaries.json):</label>
+            <pre class="code-preview" id="summaries-preview" style="max-height: 250px; overflow-y: auto;">Memuat summaries.json...</pre>
           </div>
         </div>
-      </section>
+      </div>
+
+      <!-- ==================== TAB 6: LOGS & RIWAYAT ==================== -->
+      <div class="tab-pane" id="tab-logs">
+        <div class="grid-2col">
+          <!-- Realtime Logs Viewer -->
+          <div class="section-card">
+            <div class="section-header">
+              <h2 class="section-title">Realtime Container Logs</h2>
+              <div class="log-controls">
+                <select id="log-container-select" onchange="startContainerLogStream()"></select>
+                <button class="btn btn-sm btn-outline" onclick="downloadSelectedLog()">Download Log</button>
+              </div>
+            </div>
+            <div class="log-filter-bar">
+              <input type="text" id="log-search-input" placeholder="Cari dalam log..." oninput="filterLogs()">
+            </div>
+            <pre class="terminal-window" id="live-container-logs" style="height: 400px;">Pilih container untuk melihat streaming logs...</pre>
+          </div>
+
+          <!-- Deploy History -->
+          <div class="section-card">
+            <div class="section-header">
+              <h2 class="section-title">Riwayat Deployment</h2>
+              <button class="btn btn-sm btn-outline" onclick="loadDeployHistory()">Refresh</button>
+            </div>
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Waktu</th>
+                    <th>Perintah / Args</th>
+                    <th>Status</th>
+                    <th>Log</th>
+                  </tr>
+                </thead>
+                <tbody id="deploy-history-tbody">
+                  <tr><td colspan="4" class="text-center">Belum ada riwayat deployment.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </main>
-
-    <!-- Modals -->
-    <!-- 1. Realtime Log Viewer Modal -->
-    <div class="modal-backdrop" id="log-modal" style="display: none;">
-      <div class="modal-dialog modal-large">
-        <div class="modal-header">
-          <div class="modal-title-wrap">
-            <span class="terminal-dot red"></span>
-            <span class="terminal-dot yellow"></span>
-            <span class="terminal-dot green"></span>
-            <h3 class="modal-title" id="log-modal-title">Logs: container_name</h3>
-          </div>
-          <div class="modal-actions">
-            <label class="auto-scroll-label">
-              <input type="checkbox" id="log-auto-scroll" checked>
-              <span>Auto-scroll</span>
-            </label>
-            <select id="log-tail-select" class="dropdown-select-sm">
-              <option value="50">50 baris</option>
-              <option value="150" selected>150 baris</option>
-              <option value="300">300 baris</option>
-              <option value="500">500 baris</option>
-            </select>
-            <button class="btn-sm btn-ghost" id="btn-copy-logs" title="Copy Semua Log">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-              <span>Copy</span>
-            </button>
-            <button class="btn-close" id="btn-close-log-modal">&times;</button>
-          </div>
-        </div>
-        <div class="modal-body log-modal-body">
-          <div class="log-filter-bar">
-            <input type="text" id="log-search-input" placeholder="Filter teks log...">
-          </div>
-          <pre class="terminal-window" id="log-content-pre">Memuat logs...</pre>
-        </div>
-      </div>
-    </div>
-
-    <!-- 2. CLI Shortcuts Cheat Sheet Modal -->
-    <div class="modal-backdrop" id="shortcuts-modal" style="display: none;">
-      <div class="modal-dialog">
-        <div class="modal-header">
-          <h3 class="modal-title" id="shortcuts-modal-title">⚡ CLI Shortcuts & Commands</h3>
-          <button class="btn-close" id="btn-close-shortcuts-modal">&times;</button>
-        </div>
-        <div class="modal-body">
-          <p class="modal-desc" id="shortcuts-modal-desc">Klik ikon copy untuk menyalin perintah ke terminal Anda.</p>
-          <div class="shortcuts-command-list" id="shortcuts-command-list">
-            <!-- Dynamically populated -->
-          </div>
-        </div>
-      </div>
-    </div>
 
     <!-- Toast Notification -->
     <div class="toast-container" id="toast-container"></div>

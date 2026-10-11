@@ -2,7 +2,7 @@ services:
   app___PROJECT__:
     build:
       context: .
-      dockerfile: .docker/Dockerfile
+      dockerfile: Dockerfile
       args:
         PHP_VERSION: "__PHP_VERSION__"
         COMPOSER_VERSION: "__COMPOSER_VERSION__"
@@ -12,8 +12,8 @@ services:
     ports:
       - "__HTTP_PORT__:80"
     volumes:
-      - .:/var/www
-      - ./.docker/apache-vhost.conf:/etc/apache2/sites-available/000-default.conf:ro
+      - ./src:/var/www
+      - ./apache-vhost.conf:/etc/apache2/sites-available/000-default.conf:ro
     environment:
       APP_ENV: "local"
       DB_CONNECTION: "mysql"

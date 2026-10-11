@@ -6,3 +6,7 @@ vendor
 *.zip
 *.gz
 *.sql
+logs
+mysql
+stack.json
+docker-compose*.yml

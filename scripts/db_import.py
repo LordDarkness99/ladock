@@ -59,23 +59,46 @@ def main():
     args = ap.parse_args()
 
     dump_files = []
+    central_db_folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mysql", "db", args.project_name)
+
     if args.dump:
         dump_path = os.path.abspath(args.dump)
         if not os.path.isfile(dump_path):
             print(f"File dump tidak ditemukan: {dump_path}", file=sys.stderr)
             sys.exit(1)
-        dump_files.append(dump_path)
+        dump_files = [dump_path]
+    elif os.path.isdir(central_db_folder) and os.path.isfile(os.path.join(central_db_folder, "data.sql")):
+        # Gunakan data.sql sebagai sumber dump data utama
+        dump_files = [os.path.join(central_db_folder, "data.sql")]
     else:
         found = find_dump_files(args.project_path)
-        if not found:
-            print("Tidak ada file .sql ditemukan di dalam project, lewati import data.")
+        # Saring file yang bukan dump data aplikasi (misal mysql.sql cPanel atau schema only)
+        filtered = [
+            f for f in found
+            if os.path.basename(f).lower() != "mysql.sql"
+            and not os.path.basename(f).lower().startswith("schema")
+            and not os.path.basename(f).lower().startswith("backup_")
+        ]
+        if filtered:
+            # Pilih satu file dump terbesar (paling lengkap)
+            filtered.sort(key=lambda p: os.path.getsize(p), reverse=True)
+            dump_files = [filtered[0]]
+        elif found:
+            dump_files = [found[0]]
+        else:
+            print("Tidak ada file dump data .sql yang valid ditemukan, lewati import.")
             sys.exit(0)
-        dump_files = found
-        if len(found) > 1:
-            print("Ditemukan beberapa file .sql di dalam project, mengimpor secara berurutan:")
-            for f in found:
-                size_mb = os.path.getsize(f) / (1024 * 1024)
-                print(f"  - {f} ({size_mb:.1f} MB)")
+
+    # Simpan/perbarui data.sql di mysql/db/<project_name>/ jika belum ada
+    os.makedirs(central_db_folder, exist_ok=True)
+    if dump_files and not dump_files[0].startswith(central_db_folder):
+        dest_copy = os.path.join(central_db_folder, "data.sql")
+        try:
+            import shutil
+            shutil.copy2(dump_files[0], dest_copy)
+            print(f"-> Dump SQL utama disimpan di: {dest_copy}")
+        except Exception:
+            pass
 
     db_container = args.db_container if getattr(args, 'db_container', None) else f"db_{args.project_name}"
     

@@ -1,0 +1,38 @@
+# Environment & secret files
+.env
+.env.*
+!.env.example
+
+# Deployed application instances
+deployed/
+
+# Database dumps and runtime data
+mysql/db/*/backups/
+mysql/db/*/*.sql
+!mysql/README.md
+!mysql/db/*/README.md
+
+# Uploads & temporary archives
+uploads/
+*.tar.gz
+*.zip
+*.tar
+
+# Logs
+logs/
+*.log
+
+# Python cache & virtualenv
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+venv/
+.venv/
+
+# Node modules
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db

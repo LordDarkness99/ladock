@@ -1,0 +1,26 @@
+{
+  "deploy_root": "./deployed",
+  "central_db": {
+    "container_name": "ladock_mysql",
+    "port": 3308,
+    "volume_name": "ladock_db_central_data",
+    "network": "ladock_net",
+    "root_password": "3baa6e5d124af02611fd0efb79ae292d"
+  },
+  "dashboard": {
+    "port": 9090,
+    "auth_enabled": false,
+    "auth_token": "admin123"
+  },
+  "default_ports": {
+    "monolith_http": 8080,
+    "gateway_http": 8080,
+    "base_app_port": 8081
+  },
+  "paths": {
+    "templates_dir": "templates",
+    "scripts_dir": "scripts",
+    "logs_dir": "logs",
+    "mysql_db_dir": "mysql/db"
+  }
+}
