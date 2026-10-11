@@ -106,5 +106,17 @@
   },
   "track.txt": {
     "summary": "Catatan ringkasan contoh perintah deployment lokal, port, dan monitoring LaDock."
+  },
+  "scripts/normalize_assets.py": {
+    "summary": "Utilitas otomatis untuk memindai folder public dan menormalisasi path URL aset statis lokal (CSS/JS/images) di dalam template Blade/HTML agar tidak merusak layout saat di-deploy."
+  },
+  "tests/test_normalize_assets.py": {
+    "summary": "Unit test untuk memvalidasi algoritma normalisasi path aset statis lokal dan memastikan tag link/script pada template terkonversi dengan benar."
+  },
+  "mysql/db/jatimfair2022/README.md": {
+    "summary": "Dokumentasi struktur database dan panduan dump/restore untuk aplikasi jatimfair2022."
+  },
+  ".gitignore": {
+    "summary": "Konfigurasi Git ignore untuk mengecualikan folder instance deployed/, file dump SQL, arsip uploads/, log, dan file cache Python/Node."
   }
 }
