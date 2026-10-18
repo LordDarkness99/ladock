@@ -9,13 +9,16 @@ trap 'echo "❌ [DESTROY ERROR] Terjadi kegagalan di baris $LINENO!" >&2' ERR
 #
 #  Contoh:
 #    ./destroy.sh jatimfair2022
-#    ./destroy.sh deployed/jatimfair2022
+#    ./destroy.sh docker/jatimfair2022
 #    ./destroy.sh /home/nizar/Documents/.../app_name
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/config.json"
-DEFAULT_DEPLOY_ROOT="$SCRIPT_DIR/deployed"
+DEFAULT_DEPLOY_ROOT="$SCRIPT_DIR/docker"
+if [[ -f "$CONFIG_FILE" ]] && command -v python3 >/dev/null 2>&1; then
+  DEFAULT_DEPLOY_ROOT="$(python3 -c "import json, os; d=json.load(open('$CONFIG_FILE')); r=d.get('deploy_root', '$DEFAULT_DEPLOY_ROOT'); print(os.path.abspath(os.path.join('$SCRIPT_DIR', r)) if not os.path.isabs(r) else r)" 2>/dev/null || echo "$DEFAULT_DEPLOY_ROOT")"
+fi
 
 INPUT_PATH="${1:-}"
 WITH_IMAGES=0
@@ -29,7 +32,7 @@ if [[ -z "$INPUT_PATH" ]]; then
   echo ""
   echo "Contoh:"
   echo "  $0 jatimfair2022"
-  echo "  $0 deployed/jatimfair2022"
+  echo "  $0 docker/jatimfair2022"
   echo "  $0 /path/ke/folder-project"
   exit 1
 fi
@@ -42,7 +45,7 @@ if [[ -d "$INPUT_PATH" ]]; then
   PROJECT_PATH="$(cd "$INPUT_PATH" && pwd)"
   RAW_NAME="$(basename "$PROJECT_PATH")"
 else
-  # Cek jika nama ada di folder deployed/
+  # Cek jika nama ada di folder deployment lokal
   CLEAN_GUESS="$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g' | sed -E 's/^_+|_+$//g')"
   STRIPPED_GUESS="${CLEAN_GUESS%_laravel}"
   

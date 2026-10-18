@@ -15,7 +15,7 @@ import sys
 
 # Folder yang dilewati saat scan (biar cepat & tidak salah nemu artisan
 # palsu di dalam vendor/ punya project lain)
-SKIP_DIRS = {"vendor", "node_modules", ".git", "storage", ".docker", "bootstrap", "public"}
+SKIP_DIRS = {"vendor", "node_modules", ".git", "storage", ".docker", "docker", "bootstrap", "public"}
 MAX_DEPTH = 6
 
 

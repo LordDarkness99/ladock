@@ -8,7 +8,7 @@
 #    - Ekstraksi otomatis arsip .zip, .tar.gz, .tgz dengan proteksi Zip-Slip & corrupt
 #    - Deteksi stack luas (PHP, Node.js, Python, Go, dll.) -> stack.json
 #    - Restrukturisasi folder: <app>/src/, docker-compose.yml, Dockerfile, stack.json, logs/
-#    - Database Sentral di Docker Named Volume + dump di mysql/db/<app>/
+#    - Aplikasi di docker/<app>/ dan Database Sentral di docker/ladock_mysql/data/
 # ==============================================================================
 
 set -euo pipefail
@@ -21,7 +21,7 @@ CONFIG_FILE="$SCRIPT_DIR/config.json"
 CENTRAL_ENV_FILE="$SCRIPT_DIR/.ladock_db.env"
 
 # ── Baca konfigurasi default dari config.json jika ada ────────────────────────
-DEFAULT_DEPLOY_ROOT="$SCRIPT_DIR/deployed"
+DEFAULT_DEPLOY_ROOT="$SCRIPT_DIR/docker"
 DEFAULT_MONOLITH_PORT=8080
 DEFAULT_BASE_APP_PORT=8081
 DEFAULT_DB_PORT=3308
@@ -211,7 +211,7 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
   RAW_NAME="$(basename "$PROJECT_PATH")"
   PROJECT_NAME="$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g' | sed -E 's/^_+|_+$//g')"
 
-  # ── Pusatkan semua aplikasi ke folder automasi/deployed/<app_name>/ ─────────
+  # ── Pusatkan semua aplikasi ke folder docker/<app_name>/ ───────────────────
   TARGET_DEPLOY_DIR="$DEFAULT_DEPLOY_ROOT/$PROJECT_NAME"
   if [[ "$PROJECT_PATH" != "$TARGET_DEPLOY_DIR" && "$PROJECT_PATH" != "$TARGET_DEPLOY_DIR/src" ]]; then
     log "Menata & menyalin project ke direktori terpusat: $TARGET_DEPLOY_DIR ..."
@@ -277,13 +277,13 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
   echo " Source (src)  : $SRC_DIR"
   echo " Web Server    : Apache"
   echo " HTTP Port     : $HTTP_PORT"
-  echo " MySQL Host    : 127.0.0.1 (Docker Volume: ladock_db_central_data)"
+  echo " MySQL Host    : 127.0.0.1 (Data lokal: $SCRIPT_DIR/docker/ladock_mysql/data)"
   echo " MySQL Port    : $DB_PORT"
   echo " PHP Version   : $PHP_VERSION"
   echo " Stack Spec    : $PROJECT_PATH/stack.json"
   hr
 
-  # ── Siapkan Folder Database Sentral Lokal: mysql/db/<app_name>/ ───────────
+  # ── Siapkan Folder Database & Backup Lokal ────────────────────────────────
   CENTRAL_DB_DIR="$SCRIPT_DIR/mysql/db/$PROJECT_NAME"
   mkdir -p "$CENTRAL_DB_DIR"
 
@@ -524,6 +524,20 @@ fi
 
 RAW_NAME="$(basename "$PROJECT_PATH")"
 PROJECT_NAME="$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g' | sed -E 's/^_+|_+$//g')"
+SOURCE_PROJECT_PATH="$PROJECT_PATH"
+PROJECT_PATH="$SCRIPT_DIR/docker/$PROJECT_NAME"
+mkdir -p "$PROJECT_PATH/apps"
+
+for svc_name in "${SVC_NAMES[@]}"; do
+  SOURCE_SVC_PATH="${SVC_PATHS[$svc_name]}"
+  TARGET_SVC_PATH="$PROJECT_PATH/apps/$svc_name"
+  mkdir -p "$TARGET_SVC_PATH"
+  if [[ "$(realpath "$SOURCE_SVC_PATH")" != "$(realpath "$TARGET_SVC_PATH")" ]]; then
+    log "Menyalin source service '$svc_name' ke $TARGET_SVC_PATH ..."
+    cp -a "$SOURCE_SVC_PATH/." "$TARGET_SVC_PATH/"
+  fi
+  SVC_PATHS["$svc_name"]="$TARGET_SVC_PATH"
+done
 
 declare -A SVC_HTTP_PORTS=()
 declare -A SVC_PHP_VERSIONS=()
@@ -553,6 +567,7 @@ done
 hr
 echo " Mode         : MICROSERVICE"
 echo " Project Root : $PROJECT_PATH"
+echo " Source Root  : $SOURCE_PROJECT_PATH"
 echo " Project Name : $PROJECT_NAME"
 echo " Gateway Port : $GATEWAY_PORT"
 echo " MySQL Port   : $DB_PORT"
@@ -696,6 +711,32 @@ log "Menjalankan stack microservices..."
 cd "$PROJECT_PATH"
 $DC -f "$COMPOSE_APP_FILE" -p "${PROJECT_NAME}_app_stack" down --remove-orphans >/dev/null 2>&1 || true
 $DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" down --remove-orphans >/dev/null 2>&1 || true
+
+for svc_name in "${SVC_NAMES[@]}"; do
+  DB_DATA_DIR="$PROJECT_PATH/db/$svc_name/data"
+  DB_MIGRATION_MARKER="$PROJECT_PATH/db/$svc_name/.local-storage-migrated"
+  OLD_DB_VOLUME="${PROJECT_NAME}_db_stack_${PROJECT_NAME}_${svc_name}_dbdata"
+  mkdir -p "$DB_DATA_DIR"
+
+  if docker volume inspect "$OLD_DB_VOLUME" >/dev/null 2>&1; then
+    if [[ -f "$DB_MIGRATION_MARKER" ]]; then
+      info "Datadir lokal '$svc_name' sudah dimigrasikan; named volume lama dipertahankan sebagai cadangan."
+    elif [[ -z "$(find "$DB_DATA_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+      log "Memindahkan data DB service '$svc_name' ke $DB_DATA_DIR ..."
+      docker run --rm \
+        -v "${OLD_DB_VOLUME}:/source:ro" \
+        -v "$DB_DATA_DIR:/destination" \
+        --user 0:0 \
+        --entrypoint sh \
+        mysql:8.0 \
+        -ec 'cp -a /source/. /destination/'
+      touch "$DB_MIGRATION_MARKER"
+    else
+      echo "❌ Migrasi DB '$svc_name' dibatalkan: folder lokal berisi data tetapi belum memiliki penanda migrasi: $DB_DATA_DIR" >&2
+      exit 1
+    fi
+  fi
+done
 
 $DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" up -d
 

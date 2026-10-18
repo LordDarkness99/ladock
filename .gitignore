@@ -5,6 +5,7 @@
 
 # Deployed application instances
 deployed/
+/docker/
 
 # Database dumps and runtime data
 mysql/db/*/backups/

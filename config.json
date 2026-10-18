@@ -1,5 +1,5 @@
 {
-  "deploy_root": "./deployed",
+  "deploy_root": "./docker",
   "central_db": {
     "container_name": "ladock_mysql",
     "port": 3308,

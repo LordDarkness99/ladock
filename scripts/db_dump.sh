@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # LaDock — Script Backup / Dump Database MySQL Sentral
-# Mengambil dump database dari Docker Named Volume (melalui container ladock_mysql)
+# Mengambil dump database dari container ladock_mysql dengan datadir lokal
 # dan menyimpannya secara rapi ke folder: mysql/db/<app_name>/
 # ==============================================================================
 
@@ -84,7 +84,7 @@ cat > "$OUTPUT_DIR/README.md" <<EOF
 # Database Info: ${APP_NAME}
 
 - **Database Name**: \`${DB_NAME}\`
-- **Host Container**: \`${CONTAINER_NAME}\` (Docker Named Volume: \`ladock_db_central_data\`)
+- **Host Container**: \`${CONTAINER_NAME}\` (datadir lokal: \`docker/ladock_mysql/data/\`)
 - **Port Internal**: 3306
 - **Port Host**: 3308
 - **Last Backup**: $(date)

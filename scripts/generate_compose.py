@@ -67,7 +67,7 @@ def build_db_compose(
             f"    ports:",
             f'      - "{svc_db_port}:3306"',
             f"    volumes:",
-            f"      - {project}_{sname}_dbdata:/var/lib/mysql",
+            f"      - ./db/{sname}/data:/var/lib/mysql",
             f"    networks:",
             f"      - {project}_net",
             f"    healthcheck:",
@@ -82,12 +82,7 @@ def build_db_compose(
         "networks:",
         f"  {project}_net:",
         f"    name: {project}_net",
-        "",
-        "volumes:",
     ]
-    for svc in services:
-        sname = svc["name"]
-        lines.append(f"  {project}_{sname}_dbdata:")
 
     return "\n".join(lines) + "\n"
 

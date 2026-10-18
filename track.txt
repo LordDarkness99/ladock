@@ -8,10 +8,13 @@ mysql -h 127.0.0.1 -P 3307 -u travel_agency_admin__user -p
 
 docker run -d --name ladock_phpmyadmin --restart unless-stopped --network ladock_net -p 8095:80 -e PMA_HOST=ladock_mysql phpmyadmin/phpmyadmin
 
+./central_db.sh start
 
 ./destroy.sh jatimfair2022
 # atau: ./destroy.sh deployed/jatimfair2022
 ./deploy.sh --cpmove=/home/nizar/Documents/summy/cpmove-jatimfair2022.tar.gz 8083 3308
+./scripts/db_restore.sh jatimfair2022
+./scripts/db_dump.sh jatimfair2022 jatimfair2022_db
 
 ./deploy.sh /home/nizar/Documents/summy/uji/event-management-system-main
 ./destroy.sh /home/nizar/Documents/summy/uji/event-management-system-main
@@ -19,10 +22,15 @@ docker run -d --name ladock_phpmyadmin --restart unless-stopped --network ladock
 ./deploy.sh /home/nizar/Documents/summy/uji/Student-Event-Management-Web-Application-main 8086 3308
 ./destroy.sh /home/nizar/Documents/summy/uji/Student-Event-Management-Web-Application-main
 
-./deploy.sh /home/nizar/Documents/summy/uji/vaahcms
-./destroy.sh /home/nizar/Documents/summy/uji/vaahcms
 # Web Dashboard & Monitoring (Microservice & Monolith):
 # Akses: http://localhost:9090
 ./monitor.sh start 9090
 ./monitor.sh status
 ./monitor.sh stop
+
+
+docker volume ls
+docker volume inspect NAMA_VOLUME
+
+$ docker volume inspect --format '{{ .Mountpoint }}' linkding_data
+$ /var/lib/docker/volumes/linkding_data/_data

@@ -32,7 +32,7 @@ function loadConfig() {
     console.error('Error loading config.json:', e);
   }
   return {
-    deploy_root: './deployed',
+    deploy_root: './docker',
     central_db: {
       container_name: 'ladock_mysql',
       port: 3308,
@@ -172,7 +172,7 @@ function getClusterStatus() {
 // Scan Aplikasi yang Ter-deploy
 function getDeployedApps() {
   const cfg = loadConfig();
-  const deployRoot = path.resolve(ROOT_DIR, cfg.deploy_root || './deployed');
+  const deployRoot = path.resolve(ROOT_DIR, cfg.deploy_root || './docker');
   const apps = [];
 
   const checkDir = (dirPath) => {

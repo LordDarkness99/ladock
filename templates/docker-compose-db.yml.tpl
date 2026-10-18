@@ -12,7 +12,7 @@ services:
     ports:
       - "__DB_PORT__:3306"
     volumes:
-      - __PROJECT___dbdata:/var/lib/mysql
+      - ./db/data:/var/lib/mysql
     networks:
       - __PROJECT___net
     healthcheck:
@@ -24,6 +24,3 @@ services:
 networks:
   __PROJECT___net:
     name: __PROJECT___net
-
-volumes:
-  __PROJECT___dbdata:

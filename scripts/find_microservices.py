@@ -28,7 +28,7 @@ import sys
 SKIP_DIRS = {
     "vendor", "node_modules", ".git", ".hg", ".svn",
     "storage", "bootstrap", "cache", "public",
-    ".docker", ".idea", ".vscode", "__pycache__",
+    ".docker", "docker", ".idea", ".vscode", "__pycache__",
 }
 
 MAX_DEPTH_DEFAULT = 5

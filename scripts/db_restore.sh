@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # LaDock — Script Restore Database MySQL Sentral
-# Mengimpor dump SQL dari folder mysql/db/<app_name>/ ke dalam Docker Named Volume
-# (melalui container ladock_mysql)
+# Mengimpor dump SQL dari folder mysql/db/<app_name>/ ke database ladock_mysql
 # ==============================================================================
 
 set -euo pipefail

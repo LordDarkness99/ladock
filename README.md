@@ -17,11 +17,12 @@ Otomasi modern untuk men-deploy aplikasi web dan hasil migrasi cPanel ke Docker 
    - Versi runtime, ekstensi PHP yang dibutuhkan, web server, dan jenis database tersimpan di `stack.json`.
 3. **Restrukturisasi Folder Hasil Deployment yang Bersih**:
    - Tidak lagi mengotori folder dengan berkas hidden `.docker/` atau `.docker-compose-app.yml`.
-   - Kode aplikasi tertata rapi di dalam subfolder `src/`.
+   - Kode aplikasi hasil deployment tersimpan lokal di `docker/<app_name>/src/`.
    - `docker-compose.yml`, `Dockerfile`, `apache-vhost.conf`, `.dockerignore`, `.env`, `stack.json`, dan `logs/` berada di root aplikasi.
    - File sementara seperti `.env.bak` tidak lagi dibuat/ditinggalkan.
-4. **Penyimpanan Database Sentral Terstruktur**:
-   - Data fisik MySQL tetap tersimpan aman di **Docker Named Volume (`ladock_db_central_data`)** (bukan bind mount) untuk performa dan integritas InnoDB.
+4. **Penyimpanan Aplikasi & Database Lokal Terstruktur**:
+   - Source aplikasi hasil deployment disimpan di `docker/<app_name>/`.
+   - Data fisik MySQL sentral disimpan di `docker/ladock_mysql/data/`; database microservice disimpan di `docker/<project>/db/<service>/data/`.
    - File dump `.sql` diorganisir rapi di **`mysql/db/<app_name>/`** (`data.sql`, `schema.sql`, snapshot bertanggal, dan `README.md`).
    - Tersedia helper script: `./scripts/db_dump.sh` dan `./scripts/db_restore.sh`.
 5. **Web Control Center & Monitoring Dashboard**:
@@ -45,8 +46,12 @@ automasi/
 ├── destroy.sh                   <- Cleanup container & project
 ├── monitor.sh                   <- Launcher web control center
 ├── central_db.sh                <- Inisialisasi & manager MySQL sentral
+├── docker/                      <- Source aplikasi & data database lokal (diabaikan Git)
+│   ├── <app_name>/
+│   │   └── src/                 <- Source aplikasi monolith hasil deployment
+│   └── ladock_mysql/data/       <- Datadir fisik MySQL sentral
 ├── mysql/
-│   ├── README.md                <- Dokumentasi arsitektur volume DB sentral
+│   ├── README.md                <- Dokumentasi penyimpanan DB lokal
 │   └── db/                      <- Folder penyimpanan dump SQL per aplikasi
 │       └── <app_name>/
 │           ├── schema.sql
@@ -55,8 +60,8 @@ automasi/
 ├── scripts/
 │   ├── extract_archive.py       <- Ekstraksi aman .zip, .tar.gz (Zip-Slip safe)
 │   ├── detect_stack.py          <- Deteksi stack & dependensi -> stack.json
-│   ├── db_dump.sh               <- Script backup DB dari volume ke mysql/db/<app>/
-│   ├── db_restore.sh            <- Script restore DB ke volume dari mysql/db/<app>/
+│   ├── db_dump.sh               <- Script backup DB ke mysql/db/<app>/
+│   ├── db_restore.sh            <- Script restore DB dari mysql/db/<app>/
 │   ├── db_import.py             <- Utilitas impor dump SQL ke container MySQL
 │   ├── normalize_assets.py      <- Normalisasi URL aset hardcoded ke lokal
 │   ├── start_ui.sh              <- Launcher server control center
@@ -76,9 +81,9 @@ automasi/
     └── test_deploy_structure.sh <- Test simulasi struktur deployment
 ```
 
-### 2. Struktur Folder Hasil Deployment (`deployed/<app_name>/`)
+### 2. Struktur Folder Hasil Deployment (`docker/<app_name>/`)
 ```text
-deployed/<app_name>/
+docker/<app_name>/
 ├── src/                         <- Seluruh source code aplikasi (Laravel/PHP/dll)
 │   ├── app/
 │   ├── public/
@@ -109,32 +114,31 @@ chmod +x deploy.sh destroy.sh central_db.sh monitor.sh
 ./deploy.sh /path/ke/folder-project 8080 3308
 
 # Dengan Opsi Lengkap:
-./deploy.sh --archive=/path/arsip.zip --dest=./deployed/myapp 8080 3308 --force-import
+./deploy.sh --archive=/path/arsip.zip --dest=./docker/myapp 8080 3308 --force-import
 ```
 
 ### 2. Menghentikan & Membersihkan Container
 
 ```bash
 # Hentikan container aplikasi (tanpa menghapus image/DB)
-./destroy.sh ./deployed/<app_name>
+./destroy.sh ./docker/<app_name>
 
 # Hentikan dan hapus image Docker terkait:
-./destroy.sh ./deployed/<app_name> --with-images
+./destroy.sh ./docker/<app_name> --with-images
 ```
 
 ---
 
-## 🗄️ Manajemen Database Sentral & Named Volume
+## 🗄️ Manajemen Database Sentral & Penyimpanan Lokal
 
-Data fisik MySQL disimpan di **Docker Named Volume (`ladock_db_central_data`)**:
+Data fisik MySQL sentral disimpan langsung di folder repo:
+- Folder host: **`docker/ladock_mysql/data/`**
+- Folder container: **`/var/lib/mysql`**
 - Port Host: **`3308`** (Internal: `3306`)
 - Container: **`ladock_mysql`**
 - Network: **`ladock_net`**
 
-### Mengapa Menggunakan Docker Named Volume (Bukan Bind Mount)?
-1. **Keamanan Mesin InnoDB**: Bind mount lokal pada host OS rawan mengalami *file locking race condition* dan *fsync corruption* saat container mati mendadak.
-2. **Isolasi Permission**: MySQL berjalan dengan UID internal `mysql:mysql` (999/1001). Bind mount lokal menyebabkan konflik kepemilikan berkas dengan user host.
-3. **Performa I/O**: Docker volume dikelola langsung oleh storage driver kernel Linux, memberikan performa I/O database tertinggi.
+Pada penggunaan pertama setelah perubahan, `central_db.sh` memindahkan datadir dari named volume lama ketika MySQL berhenti sementara. Named volume lama tidak dihapus dan tetap tersedia sebagai cadangan. MySQL mengelola file datadir; jangan mengedit atau menghapus file di dalamnya saat database berjalan.
 
 ### Perintah Backup & Restore
 ```bash
@@ -144,6 +148,8 @@ Data fisik MySQL disimpan di **Docker Named Volume (`ladock_db_central_data`)**:
 # Restore database dari mysql/db/<app_name>/data.sql
 ./scripts/db_restore.sh <app_name>
 ```
+
+Source aplikasi monolith disalin ke `docker/<app_name>/src/`, sedangkan microservice disalin ke `docker/<project>/apps/<service>/`. Perubahan source yang dibuat container tersimpan di folder lokal tersebut.
 
 ---
 
