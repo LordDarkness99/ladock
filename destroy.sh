@@ -9,13 +9,13 @@ trap 'echo "❌ [DESTROY ERROR] Terjadi kegagalan di baris $LINENO!" >&2' ERR
 #
 #  Contoh:
 #    ./destroy.sh jatimfair2022
-#    ./destroy.sh docker/jatimfair2022
+#    ./destroy.sh docker/apps/jatimfair2022
 #    ./destroy.sh /home/nizar/Documents/.../app_name
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/config.json"
-DEFAULT_DEPLOY_ROOT="$SCRIPT_DIR/docker"
+DEFAULT_DEPLOY_ROOT="$SCRIPT_DIR/docker/apps"
 if [[ -f "$CONFIG_FILE" ]] && command -v python3 >/dev/null 2>&1; then
   DEFAULT_DEPLOY_ROOT="$(python3 -c "import json, os; d=json.load(open('$CONFIG_FILE')); r=d.get('deploy_root', '$DEFAULT_DEPLOY_ROOT'); print(os.path.abspath(os.path.join('$SCRIPT_DIR', r)) if not os.path.isabs(r) else r)" 2>/dev/null || echo "$DEFAULT_DEPLOY_ROOT")"
 fi
@@ -32,7 +32,7 @@ if [[ -z "$INPUT_PATH" ]]; then
   echo ""
   echo "Contoh:"
   echo "  $0 jatimfair2022"
-  echo "  $0 docker/jatimfair2022"
+  echo "  $0 docker/apps/jatimfair2022"
   echo "  $0 /path/ke/folder-project"
   exit 1
 fi
@@ -57,6 +57,12 @@ else
     RAW_NAME="$STRIPPED_GUESS"
   elif [[ -d "$DEFAULT_DEPLOY_ROOT/$RAW_NAME" ]]; then
     PROJECT_PATH="$DEFAULT_DEPLOY_ROOT/$RAW_NAME"
+  elif [[ -d "$SCRIPT_DIR/docker/$CLEAN_GUESS" ]]; then
+    PROJECT_PATH="$SCRIPT_DIR/docker/$CLEAN_GUESS"
+    RAW_NAME="$CLEAN_GUESS"
+  elif [[ -d "$SCRIPT_DIR/docker/$STRIPPED_GUESS" ]]; then
+    PROJECT_PATH="$SCRIPT_DIR/docker/$STRIPPED_GUESS"
+    RAW_NAME="$STRIPPED_GUESS"
   fi
 fi
 

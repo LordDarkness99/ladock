@@ -32,7 +32,7 @@ function loadConfig() {
     console.error('Error loading config.json:', e);
   }
   return {
-    deploy_root: './docker',
+    deploy_root: './docker/apps',
     central_db: {
       container_name: 'ladock_mysql',
       port: 3308,

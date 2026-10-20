@@ -8,7 +8,7 @@
 #    - Ekstraksi otomatis arsip .zip, .tar.gz, .tgz dengan proteksi Zip-Slip & corrupt
 #    - Deteksi stack luas (PHP, Node.js, Python, Go, dll.) -> stack.json
 #    - Restrukturisasi folder: <app>/src/, docker-compose.yml, Dockerfile, stack.json, logs/
-#    - Aplikasi di docker/<app>/ dan Database Sentral di docker/ladock_mysql/data/
+#    - Aplikasi di docker/apps/<app>/ dan database di docker/db/
 # ==============================================================================
 
 set -euo pipefail
@@ -21,7 +21,7 @@ CONFIG_FILE="$SCRIPT_DIR/config.json"
 CENTRAL_ENV_FILE="$SCRIPT_DIR/.ladock_db.env"
 
 # ── Baca konfigurasi default dari config.json jika ada ────────────────────────
-DEFAULT_DEPLOY_ROOT="$SCRIPT_DIR/docker"
+DEFAULT_DEPLOY_ROOT="$SCRIPT_DIR/docker/apps"
 DEFAULT_MONOLITH_PORT=8080
 DEFAULT_BASE_APP_PORT=8081
 DEFAULT_DB_PORT=3308
@@ -211,8 +211,17 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
   RAW_NAME="$(basename "$PROJECT_PATH")"
   PROJECT_NAME="$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g' | sed -E 's/^_+|_+$//g')"
 
-  # ── Pusatkan semua aplikasi ke folder docker/<app_name>/ ───────────────────
+  # ── Pusatkan semua aplikasi ke folder docker/apps/<app_name>/ ──────────────
   TARGET_DEPLOY_DIR="$DEFAULT_DEPLOY_ROOT/$PROJECT_NAME"
+  LEGACY_DEPLOY_DIR="$SCRIPT_DIR/docker/$PROJECT_NAME"
+  if [[ ! -e "$TARGET_DEPLOY_DIR" && -d "$LEGACY_DEPLOY_DIR" ]]; then
+    log "Memindahkan deployment lama ke struktur docker/apps/..."
+    mkdir -p "$(dirname "$TARGET_DEPLOY_DIR")"
+    mv "$LEGACY_DEPLOY_DIR" "$TARGET_DEPLOY_DIR"
+    if [[ "$PROJECT_PATH" == "$LEGACY_DEPLOY_DIR" || "$PROJECT_PATH" == "$LEGACY_DEPLOY_DIR/src" ]]; then
+      PROJECT_PATH="$TARGET_DEPLOY_DIR${PROJECT_PATH#"$LEGACY_DEPLOY_DIR"}"
+    fi
+  fi
   if [[ "$PROJECT_PATH" != "$TARGET_DEPLOY_DIR" && "$PROJECT_PATH" != "$TARGET_DEPLOY_DIR/src" ]]; then
     log "Menata & menyalin project ke direktori terpusat: $TARGET_DEPLOY_DIR ..."
     mkdir -p "$TARGET_DEPLOY_DIR/src"
@@ -231,7 +240,7 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
     PROJECT_PATH="$TARGET_DEPLOY_DIR"
   fi
 
-  # ── Restrukturisasi Folder Deployment: <deploy_root>/<app_name>/ ───────────
+  # ── Restrukturisasi Folder Deployment: docker/apps/<app_name>/ ─────────────
   SRC_DIR="$PROJECT_PATH/src"
   if [[ ! -d "$SRC_DIR" ]]; then
     log "Menata struktur folder ke layout standar (memindahkan source code ke 'src/')..."
@@ -277,7 +286,7 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
   echo " Source (src)  : $SRC_DIR"
   echo " Web Server    : Apache"
   echo " HTTP Port     : $HTTP_PORT"
-  echo " MySQL Host    : 127.0.0.1 (Data lokal: $SCRIPT_DIR/docker/ladock_mysql/data)"
+  echo " MySQL Host    : 127.0.0.1 (Data lokal: $SCRIPT_DIR/docker/db/ladock_mysql/data)"
   echo " MySQL Port    : $DB_PORT"
   echo " PHP Version   : $PHP_VERSION"
   echo " Stack Spec    : $PROJECT_PATH/stack.json"
@@ -525,7 +534,19 @@ fi
 RAW_NAME="$(basename "$PROJECT_PATH")"
 PROJECT_NAME="$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g' | sed -E 's/^_+|_+$//g')"
 SOURCE_PROJECT_PATH="$PROJECT_PATH"
-PROJECT_PATH="$SCRIPT_DIR/docker/$PROJECT_NAME"
+PROJECT_PATH="$DEFAULT_DEPLOY_ROOT/$PROJECT_NAME"
+LEGACY_PROJECT_PATH="$SCRIPT_DIR/docker/$PROJECT_NAME"
+if [[ ! -e "$PROJECT_PATH" && -d "$LEGACY_PROJECT_PATH" ]]; then
+  log "Memindahkan project microservice lama ke struktur docker/apps/..."
+  mkdir -p "$(dirname "$PROJECT_PATH")"
+  mv "$LEGACY_PROJECT_PATH" "$PROJECT_PATH"
+  for svc_name in "${SVC_NAMES[@]}"; do
+    SOURCE_SVC_PATH="${SVC_PATHS[$svc_name]}"
+    if [[ "$SOURCE_SVC_PATH" == "$LEGACY_PROJECT_PATH/"* ]]; then
+      SVC_PATHS["$svc_name"]="$PROJECT_PATH/${SOURCE_SVC_PATH#"$LEGACY_PROJECT_PATH/"}"
+    fi
+  done
+fi
 mkdir -p "$PROJECT_PATH/apps"
 
 for svc_name in "${SVC_NAMES[@]}"; do
@@ -653,6 +674,7 @@ python3 "$SCRIPTS_DIR/generate_compose.py" \
   --docker-dir        "$DOCKER_DIR" \
   --gateway-port      "$GATEWAY_PORT" \
   --db-port           "$DB_PORT" \
+  --db-data-root      "$SCRIPT_DIR/docker/db" \
   --db-root-pass      "$DB_ROOT_PASS" \
   --php-versions      "$PHP_VERS_ARG" \
   --composer-versions "$COMP_VERS_ARG" \
@@ -713,8 +735,24 @@ $DC -f "$COMPOSE_APP_FILE" -p "${PROJECT_NAME}_app_stack" down --remove-orphans 
 $DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" down --remove-orphans >/dev/null 2>&1 || true
 
 for svc_name in "${SVC_NAMES[@]}"; do
-  DB_DATA_DIR="$PROJECT_PATH/db/$svc_name/data"
-  DB_MIGRATION_MARKER="$PROJECT_PATH/db/$svc_name/.local-storage-migrated"
+  DB_PROJECT_DIR="$SCRIPT_DIR/docker/db/$PROJECT_NAME"
+  DB_SERVICE_DIR="$DB_PROJECT_DIR/$svc_name"
+  DB_DATA_DIR="$DB_SERVICE_DIR/data"
+  DB_MIGRATION_MARKER="$DB_SERVICE_DIR/.local-storage-migrated"
+  LEGACY_DB_SERVICE_DIR="$PROJECT_PATH/db/$svc_name"
+  if [[ ! -d "$LEGACY_DB_SERVICE_DIR" && -d "$LEGACY_PROJECT_PATH/db/$svc_name" ]]; then
+    LEGACY_DB_SERVICE_DIR="$LEGACY_PROJECT_PATH/db/$svc_name"
+  fi
+  if [[ -d "$LEGACY_DB_SERVICE_DIR" ]]; then
+    if [[ ! -e "$DB_SERVICE_DIR" ]]; then
+      log "Memindahkan data DB service '$svc_name' ke $DB_SERVICE_DIR ..."
+      mkdir -p "$DB_PROJECT_DIR"
+      mv "$LEGACY_DB_SERVICE_DIR" "$DB_SERVICE_DIR"
+    elif [[ -n "$(find "$LEGACY_DB_SERVICE_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+      echo "❌ Data DB lama dan baru sama-sama ada untuk '$svc_name'; migrasi dihentikan agar data tidak tertimpa." >&2
+      exit 1
+    fi
+  fi
   OLD_DB_VOLUME="${PROJECT_NAME}_db_stack_${PROJECT_NAME}_${svc_name}_dbdata"
   mkdir -p "$DB_DATA_DIR"
 

@@ -41,6 +41,7 @@ def build_db_compose(
     base_db_port: int,
     db_creds: dict,
     db_root_pass: str,
+    db_data_root: str = "../../db",
 ) -> str:
     lines: list[str] = ["services:"]
 
@@ -67,7 +68,7 @@ def build_db_compose(
             f"    ports:",
             f'      - "{svc_db_port}:3306"',
             f"    volumes:",
-            f"      - ./db/{sname}/data:/var/lib/mysql",
+            f"      - {os.path.join(db_data_root, project, sname, 'data')}:/var/lib/mysql",
             f"    networks:",
             f"      - {project}_net",
             f"    healthcheck:",
@@ -184,6 +185,8 @@ def main():
     ap.add_argument("--docker-dir",        default=".docker", help="Path ke folder .docker/ (absolut)")
     ap.add_argument("--gateway-port",      required=True, type=int)
     ap.add_argument("--db-port",           required=True, type=int)
+    ap.add_argument("--db-data-root",      default="../../db",
+                    help="Folder root datadir DB untuk project ini")
     ap.add_argument("--db-root-pass",      required=True)
     ap.add_argument("--php-versions",      default="",   help="'name1:phpver,name2:phpver,...'")
     ap.add_argument("--composer-versions", default="",   help="'name1:compver,...'")
@@ -221,6 +224,7 @@ def main():
         base_db_port=args.db_port,
         db_creds=db_creds,
         db_root_pass=args.db_root_pass,
+        db_data_root=args.db_data_root,
     )
 
     app_yaml = build_app_compose(

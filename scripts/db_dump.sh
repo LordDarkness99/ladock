@@ -84,7 +84,7 @@ cat > "$OUTPUT_DIR/README.md" <<EOF
 # Database Info: ${APP_NAME}
 
 - **Database Name**: \`${DB_NAME}\`
-- **Host Container**: \`${CONTAINER_NAME}\` (datadir lokal: \`docker/ladock_mysql/data/\`)
+- **Host Container**: \`${CONTAINER_NAME}\` (datadir lokal: \`docker/db/ladock_mysql/data/\`)
 - **Port Internal**: 3306
 - **Port Host**: 3308
 - **Last Backup**: $(date)

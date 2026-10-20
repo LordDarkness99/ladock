@@ -6,14 +6,14 @@ Container Database Sentral LaDock (`ladock_mysql`) berjalan pada port host **330
 Data fisik MySQL disimpan pada folder lokal repo melalui bind mount:
 
 ```text
-docker/ladock_mysql/data -> /var/lib/mysql
+docker/db/ladock_mysql/data -> /var/lib/mysql
 ```
 
 Container MySQL berjalan sebagai user internal `mysql`; beberapa file datadir mungkin tidak dapat dibaca oleh user host biasa. Gunakan dump SQL di `mysql/db/<app_name>/` untuk melihat atau memindahkan isi database. Jangan mengedit file datadir secara langsung, terutama saat MySQL berjalan.
 
 Pada penggunaan pertama setelah perubahan, `central_db.sh` menyalin datadir dari named volume lama saat container berhenti. Named volume lama tidak dihapus. Jika folder tujuan lokal sudah berisi file tetapi container lama masih memakai penyimpanan berbeda, migrasi berhenti agar tidak menimpa data.
 
-Socket lokal MySQL dikonfigurasi ke `/var/lib/mysql/mysql.sock` agar image tidak membuat symlink socket lama di datadir. Saat konfigurasi ini pertama kali diterapkan, `central_db.sh` akan mengganti container lama tanpa menghapus atau memindahkan data di folder `docker/ladock_mysql/data/`.
+Socket lokal MySQL dikonfigurasi ke `/var/lib/mysql/mysql.sock` agar image tidak membuat symlink socket lama di datadir. Saat konfigurasi ini pertama kali diterapkan, `central_db.sh` akan mengganti container lama tanpa menghapus data di folder `docker/db/ladock_mysql/data/`. Datadir lama di `docker/ladock_mysql/data/` akan disalin ke lokasi baru saat aman.
 
 ## Manajemen Dump & Backup Terstruktur (`mysql/db/<app_name>/`)
 
@@ -79,4 +79,4 @@ Hasil backup otomatis disimpan di `mysql/db/<app_name>/data.sql`, `schema.sql`, 
 
 Script akan membaca `mysql/db/<app_name>/data.sql` dan mengimpornya kembali ke database container `ladock_mysql`.
 
-Datadir tiap database microservice berada di `docker/<project>/db/<service>/data/`. Pada deploy ulang, data dari named volume lama disalin saat container berhenti; named volume tersebut tidak dihapus dan dipertahankan sebagai cadangan.
+Datadir tiap database microservice berada di `docker/db/<project>/<service>/data/`. Pada deploy ulang, data dari named volume lama disalin saat container berhenti; named volume tersebut tidak dihapus dan dipertahankan sebagai cadangan.

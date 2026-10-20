@@ -17,12 +17,12 @@ Otomasi modern untuk men-deploy aplikasi web dan hasil migrasi cPanel ke Docker 
    - Versi runtime, ekstensi PHP yang dibutuhkan, web server, dan jenis database tersimpan di `stack.json`.
 3. **Restrukturisasi Folder Hasil Deployment yang Bersih**:
    - Tidak lagi mengotori folder dengan berkas hidden `.docker/` atau `.docker-compose-app.yml`.
-   - Kode aplikasi hasil deployment tersimpan lokal di `docker/<app_name>/src/`.
+   - Kode aplikasi hasil deployment tersimpan lokal di `docker/apps/<app_name>/src/`.
    - `docker-compose.yml`, `Dockerfile`, `apache-vhost.conf`, `.dockerignore`, `.env`, `stack.json`, dan `logs/` berada di root aplikasi.
    - File sementara seperti `.env.bak` tidak lagi dibuat/ditinggalkan.
 4. **Penyimpanan Aplikasi & Database Lokal Terstruktur**:
-   - Source aplikasi hasil deployment disimpan di `docker/<app_name>/`.
-   - Data fisik MySQL sentral disimpan di `docker/ladock_mysql/data/`; database microservice disimpan di `docker/<project>/db/<service>/data/`.
+   - Source aplikasi hasil deployment disimpan di `docker/apps/<app_name>/`.
+   - Data fisik database disimpan terpisah di `docker/db/`: MySQL sentral di `docker/db/ladock_mysql/data/` dan database microservice di `docker/db/<project>/<service>/data/`.
    - File dump `.sql` diorganisir rapi di **`mysql/db/<app_name>/`** (`data.sql`, `schema.sql`, snapshot bertanggal, dan `README.md`).
    - Tersedia helper script: `./scripts/db_dump.sh` dan `./scripts/db_restore.sh`.
 5. **Web Control Center & Monitoring Dashboard**:
@@ -46,10 +46,13 @@ automasi/
 ├── destroy.sh                   <- Cleanup container & project
 ├── monitor.sh                   <- Launcher web control center
 ├── central_db.sh                <- Inisialisasi & manager MySQL sentral
-├── docker/                      <- Source aplikasi & data database lokal (diabaikan Git)
-│   ├── <app_name>/
-│   │   └── src/                 <- Source aplikasi monolith hasil deployment
-│   └── ladock_mysql/data/       <- Datadir fisik MySQL sentral
+├── docker/                      <- Data runtime Docker (diabaikan Git)
+│   ├── apps/
+│   │   └── <app_name>/          <- Aplikasi hasil deployment
+│   │       └── src/             <- Source aplikasi monolith
+│   └── db/
+│       ├── ladock_mysql/data/   <- Datadir fisik MySQL sentral
+│       └── <project>/<service>/data/ <- Datadir database microservice
 ├── mysql/
 │   ├── README.md                <- Dokumentasi penyimpanan DB lokal
 │   └── db/                      <- Folder penyimpanan dump SQL per aplikasi
@@ -81,9 +84,9 @@ automasi/
     └── test_deploy_structure.sh <- Test simulasi struktur deployment
 ```
 
-### 2. Struktur Folder Hasil Deployment (`docker/<app_name>/`)
+### 2. Struktur Folder Hasil Deployment (`docker/apps/<app_name>/`)
 ```text
-docker/<app_name>/
+docker/apps/<app_name>/
 ├── src/                         <- Seluruh source code aplikasi (Laravel/PHP/dll)
 │   ├── app/
 │   ├── public/
@@ -114,17 +117,17 @@ chmod +x deploy.sh destroy.sh central_db.sh monitor.sh
 ./deploy.sh /path/ke/folder-project 8080 3308
 
 # Dengan Opsi Lengkap:
-./deploy.sh --archive=/path/arsip.zip --dest=./docker/myapp 8080 3308 --force-import
+./deploy.sh --archive=/path/arsip.zip --dest=./docker/apps/myapp 8080 3308 --force-import
 ```
 
 ### 2. Menghentikan & Membersihkan Container
 
 ```bash
 # Hentikan container aplikasi (tanpa menghapus image/DB)
-./destroy.sh ./docker/<app_name>
+./destroy.sh ./docker/apps/<app_name>
 
 # Hentikan dan hapus image Docker terkait:
-./destroy.sh ./docker/<app_name> --with-images
+./destroy.sh ./docker/apps/<app_name> --with-images
 ```
 
 ---
@@ -132,7 +135,7 @@ chmod +x deploy.sh destroy.sh central_db.sh monitor.sh
 ## 🗄️ Manajemen Database Sentral & Penyimpanan Lokal
 
 Data fisik MySQL sentral disimpan langsung di folder repo:
-- Folder host: **`docker/ladock_mysql/data/`**
+- Folder host: **`docker/db/ladock_mysql/data/`**
 - Folder container: **`/var/lib/mysql`**
 - Port Host: **`3308`** (Internal: `3306`)
 - Container: **`ladock_mysql`**
@@ -149,7 +152,9 @@ Pada penggunaan pertama setelah perubahan, `central_db.sh` memindahkan datadir d
 ./scripts/db_restore.sh <app_name>
 ```
 
-Source aplikasi monolith disalin ke `docker/<app_name>/src/`, sedangkan microservice disalin ke `docker/<project>/apps/<service>/`. Perubahan source yang dibuat container tersimpan di folder lokal tersebut.
+Source aplikasi monolith disalin ke `docker/apps/<app_name>/src/`, sedangkan microservice disalin ke `docker/apps/<project>/apps/<service>/`. Datadir database microservice disimpan terpisah di `docker/db/<project>/<service>/data/`. Perubahan source yang dibuat container tersimpan di folder lokal tersebut.
+
+Jika folder tujuan baru belum ada, deployment lama di `docker/<app_name>/` atau `docker/<project>/` dipindahkan ke `docker/apps/` saat deploy berikutnya. Datadir MySQL sentral lama di `docker/ladock_mysql/data/` disalin ke `docker/db/ladock_mysql/data/` saat `central_db.sh` dijalankan.
 
 ---
 

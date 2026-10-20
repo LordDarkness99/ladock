@@ -17,7 +17,8 @@ DB_PORT="${LADOCK_DB_PORT:-3308}"
 ROOT_PASS="${LADOCK_DB_ROOT_PASS:-3baa6e5d124af02611fd0efb79ae292d}"
 NETWORK_NAME="${LADOCK_NET:-ladock_net}"
 VOLUME_NAME="${LADOCK_DB_VOLUME:-ladock_db_central_data}"
-LOCAL_DATA_DIR="$SCRIPT_DIR/docker/ladock_mysql/data"
+LOCAL_DATA_DIR="$SCRIPT_DIR/docker/db/ladock_mysql/data"
+LEGACY_LOCAL_DATA_DIR="$SCRIPT_DIR/docker/ladock_mysql/data"
 
 if docker compose version >/dev/null 2>&1; then
   DC="docker compose"
@@ -116,6 +117,13 @@ ensure_central_db() {
       --entrypoint sh \
       mysql:8.0 \
       -ec 'cp -a /source/. /destination/'
+  fi
+
+  if [[ -d "$LEGACY_LOCAL_DATA_DIR" ]] && \
+     [[ -n "$(find "$LEGACY_LOCAL_DATA_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]] && \
+     [[ -z "$(find "$LOCAL_DATA_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    log "Menyalin datadir MySQL lokal lama ke '$LOCAL_DATA_DIR'..."
+    cp -a "$LEGACY_LOCAL_DATA_DIR/." "$LOCAL_DATA_DIR/"
   fi
 
   # 2. Ensure the central database container uses local project storage.
