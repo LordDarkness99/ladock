@@ -13,6 +13,8 @@ Container MySQL berjalan sebagai user internal `mysql`; beberapa file datadir mu
 
 Pada penggunaan pertama setelah perubahan, `central_db.sh` menyalin datadir dari named volume lama saat container berhenti. Named volume lama tidak dihapus. Jika folder tujuan lokal sudah berisi file tetapi container lama masih memakai penyimpanan berbeda, migrasi berhenti agar tidak menimpa data.
 
+Socket lokal MySQL dikonfigurasi ke `/var/lib/mysql/mysql.sock` agar image tidak membuat symlink socket lama di datadir. Saat konfigurasi ini pertama kali diterapkan, `central_db.sh` akan mengganti container lama tanpa menghapus atau memindahkan data di folder `docker/ladock_mysql/data/`.
+
 ## Manajemen Dump & Backup Terstruktur (`mysql/db/<app_name>/`)
 
 Dump SQL per aplikasi disimpan secara lokal:
