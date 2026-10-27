@@ -3,25 +3,25 @@
     "summary": "Konfigurasi environment MySQL sentral LaDock (nama container, port, password root, dan network Docker)."
   },
   "config.json": {
-    "summary": "Konfigurasi utama terpusat LaDock untuk deploy_root, port default, kredensial DB sentral, direktori sistem, dan pengaturan web dashboard."
+    "summary": "Konfigurasi utama LaDock untuk root deployment di docker/apps, identitas dan port MySQL sentral, network, port default aplikasi, serta lokasi template, skrip, log, dan dump database."
   },
   "README.md": {
-    "summary": "Dokumentasi lengkap LaDock v3.0: arsitektur deployment bersih, dukungan arsip ZIP/cPanel, deteksi stack multi-bahasa, manajemen DB sentral & Named Volume, web control center, panduan backup/restore, troubleshooting, dan cara menambah stack baru."
+    "summary": "Dokumentasi LaDock v3.0 tentang deployment monolith/microservices, ekstraksi arsip, deteksi stack, tata letak aplikasi docker/apps dan data database docker/db, dashboard web, backup/restore, troubleshooting, serta penambahan stack."
   },
   "central_db.sh": {
-    "summary": "Skrip Bash pengelola database MySQL sentral LaDock untuk menginisialisasi network, container, volume data Docker Named Volume, serta memeriksa status siap pakai."
+    "summary": "Skrip pengelola MySQL sentral yang menyiapkan Docker network dan container, memigrasikan data volume/lokasi legacy ke bind mount docker/db/ladock_mysql/data, memasang konfigurasi socket, dan menunggu kesiapan database."
   },
   "deploy.sh": {
-    "summary": "Entry point Bash utama untuk deployment otomatis; mendukung ekstraksi arsip .zip/.tar.gz dengan proteksi zip-slip, penataan folder ke layout bersih (<app>/src/, docker-compose.yml, Dockerfile, stack.json, logs/), deteksi stack komprehensif, dan integrasi MySQL sentral."
+    "summary": "Entry point deployment LaDock yang membaca konfigurasi, menerima aplikasi atau arsip, mendeteksi stack, menata aplikasi di docker/apps/<app>/ dan data database di docker/db/, serta menghubungkan database sentral."
   },
   "destroy.sh": {
-    "summary": "Skrip Bash untuk menghentikan dan membersihkan container project tanpa menghapus atau merusak database sentral, mendukung layout baru docker-compose.yml dan legacy."
+    "summary": "Skrip untuk menemukan project berdasarkan nama atau path dan menghentikan container Compose aplikasi/database pada layout baru maupun legacy, dengan opsi menghapus image."
   },
   "monitor.sh": {
     "summary": "Launcher praktis untuk menjalankan, memeriksa status, atau menghentikan server web dashboard dan control center LaDock."
   },
   "monitor/server.js": {
-    "summary": "Server backend Node.js untuk LaDock Control Center; menyediakan REST API status cluster, upload arsip, eksekusi deploy dengan SSE streaming realtime, kontrol container, backup/restore DB, dan editor konfigurasi."
+    "summary": "Backend Node.js LaDock Control Center yang menyediakan API status, upload dan deployment arsip dengan SSE, kontrol aplikasi/container, backup/restore database, serta editor konfigurasi."
   },
   "monitor/server.py": {
     "summary": "Server HTTP Python multithreaded (fallback) untuk dashboard monitoring status container dan resource."
@@ -30,19 +30,19 @@
     "summary": "Logika frontend reaktif LaDock Control Center; mengelola navigasi tab, polling status cluster, streaming deploy terminal SSE, upload arsip, aksi aplikasi, backup/restore DB, dan editor config."
   },
   "monitor/public/index.html": {
-    "summary": "Antarmuka web modern LaDock Control Center dengan tab Overview, Deploy Hub, Daftar Aplikasi, Manajemen DB Sentral, Editor Konfigurasi, dan Logs/Riwayat."
+    "summary": "Kerangka antarmuka LaDock Control Center dengan tab Overview, Deploy Hub, Aplikasi, DB Sentral, Konfigurasi, dan Logs/Riwayat; label navigasi memakai tampilan teks sederhana."
   },
   "monitor/public/style.css": {
     "summary": "Sistem gaya CSS responsif LaDock Control Center dengan tema clean modern, kartu statistik, terminal live output, dropzone upload, dan badge teknologi."
   },
   "mysql/README.md": {
-    "summary": "Dokumentasi arsitektur database MySQL sentral LaDock: penjelasan penggunaan Docker Named Volume (alasan tidak memakai bind mount), cara akses terminal, serta panduan backup dan restore terstruktur."
+    "summary": "Dokumentasi penyimpanan MySQL sentral pada bind mount lokal docker/db/ladock_mysql/data, migrasi dari penyimpanan lama, konfigurasi socket, akses database, serta backup dan restore dump SQL."
   },
   "scripts/db_dump.sh": {
-    "summary": "Skrip pembantu untuk mengekspor database dari container MySQL sentral ke folder terstruktur mysql/db/<app_name>/ (data.sql, schema.sql, backup bertanggal, dan README.md)."
+    "summary": "Skrip untuk mengekspor database dari container MySQL sentral ke mysql/db/<app_name>/ sebagai dump data, schema, snapshot bertanggal, dan README."
   },
   "scripts/db_restore.sh": {
-    "summary": "Skrip pembantu untuk mengimpor dan memulihkan database dari mysql/db/<app_name>/data.sql ke dalam container MySQL sentral."
+    "summary": "Skrip untuk memulihkan database ke container MySQL sentral dari mysql/db/<app_name>/data.sql atau file SQL yang ditentukan."
   },
   "scripts/db_import.py": {
     "summary": "Utilitas Python untuk mendeteksi file dump SQL, memprioritaskan folder mysql/db/<app_name>/, dan mengimpornya ke database MySQL sentral."
@@ -53,6 +53,9 @@
   "scripts/detect_php_version.py": {
     "summary": "Mendeteksi constraint versi PHP dari composer.json project Laravel dengan fallback versi yang didukung."
   },
+  "scripts/__init__.py": {
+    "summary": "Penanda package Python untuk memungkinkan modul di direktori scripts diimpor sebagai package."
+  },
   "scripts/extract_archive.py": {
     "summary": "Ekstraktor arsip universal (.zip, .tar.gz, .tgz) dengan validasi integritas/corrupt, proteksi path traversal (Zip-Slip), dan penataan struktur aplikasi cPanel maupun project umum."
   },
@@ -60,13 +63,13 @@
     "summary": "Ekstraktor arsip backup cPanel tar.gz cpmove untuk menyatukan source Laravel dan public_html."
   },
   "scripts/find_laravel_projects.py": {
-    "summary": "Memindai direktori secara rekursif untuk menemukan root project Laravel berdasarkan file artisan."
+    "summary": "Memindai direktori secara rekursif untuk menemukan root project Laravel berdasarkan file artisan, sebagai dasar pemetaan deployment."
   },
   "scripts/find_microservices.py": {
-    "summary": "Memindai sub-project Laravel untuk deployment mode microservices dan menghasilkan pemetaan service."
+    "summary": "Memindai sub-project Laravel untuk deployment microservices dan menghasilkan pemetaan service beserta informasi port/aplikasi yang diperlukan generator Compose."
   },
   "scripts/generate_compose.py": {
-    "summary": "Membangun konfigurasi Docker Compose untuk deployment mode microservices."
+    "summary": "Membangun konfigurasi Docker Compose untuk aplikasi dan database microservices, dengan datadir database terpisah pada folder lokal docker/db/<project>/<service>/data."
   },
   "scripts/generate_gateway_conf.py": {
     "summary": "Menghasilkan konfigurasi Apache API Gateway untuk perutean prefix URL microservices."
@@ -87,7 +90,7 @@
     "summary": "Template Docker Compose utama berstruktur bersih dengan mount ./src:/var/www dan koneksi ke jaringan ladock_net."
   },
   "templates/docker-compose-db.yml.tpl": {
-    "summary": "Template Docker Compose database terpisah (mode microservices legacy)."
+    "summary": "Template Docker Compose database microservice dengan bind mount ./db/data untuk datadir lokal dan healthcheck MySQL."
   },
   "templates/gateway-httpd.conf": {
     "summary": "Konfigurasi dasar Apache httpd untuk API Gateway."
@@ -105,7 +108,7 @@
     "summary": "Skrip pengujian simulasi restrukturisasi folder deployment dan validasi berkas stack.json serta dump DB."
   },
   "track.txt": {
-    "summary": "Catatan ringkasan contoh perintah deployment lokal, port, dan monitoring LaDock."
+    "summary": "Catatan penggunaan lokal LaDock: contoh perintah deployment, lokasi aplikasi dan data database, port, serta monitoring."
   },
   "scripts/normalize_assets.py": {
     "summary": "Utilitas otomatis untuk memindai folder public dan menormalisasi path URL aset statis lokal (CSS/JS/images) di dalam template Blade/HTML agar tidak merusak layout saat di-deploy."
@@ -114,9 +117,15 @@
     "summary": "Unit test untuk memvalidasi algoritma normalisasi path aset statis lokal dan memastikan tag link/script pada template terkonversi dengan benar."
   },
   "mysql/db/jatimfair2022/README.md": {
-    "summary": "Dokumentasi struktur database dan panduan dump/restore untuk aplikasi jatimfair2022."
+    "summary": "Dokumentasi koneksi dan struktur dump database aplikasi jatimfair2022, termasuk lokasi data, waktu backup terakhir, serta panduan restore."
   },
   ".gitignore": {
-    "summary": "Konfigurasi Git ignore untuk mengecualikan folder instance deployed/, file dump SQL, arsip uploads/, log, dan file cache Python/Node."
+    "summary": "Aturan Git untuk mengecualikan data runtime pada folder docker/, deployment legacy, dump SQL, arsip upload, log, dan cache Python/Node."
+  },
+  "templates/mysql-central.cnf": {
+    "summary": "Konfigurasi klien dan server MySQL sentral agar memakai socket /var/lib/mysql/mysql.sock di dalam datadir."
+  },
+  "tests/test_generate_compose.py": {
+    "summary": "Tes generator Compose yang memastikan database microservice memakai direktori data lokal terpisah, bukan Docker named volume."
   }
 }
