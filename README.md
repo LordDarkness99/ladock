@@ -132,6 +132,8 @@ Batas memori default dikonfigurasi melalui `resources.memory_limit` di `config.j
 
 Saat deploy, kredensial database dibaca hanya dari file `.env` service (`DB_DATABASE`, `DB_USERNAME`/`DB_USER`, dan `DB_PASSWORD`); `.env.example` tidak dibaca ataupun disalin sebagai fallback. Jika `.env` atau variabelnya tidak tersedia, LaDock memakai kredensial tersimpan atau membuat hanya nilai yang belum ada. Nilai aplikasi lain seperti `APP_KEY` tidak dibuat ulang atau ditimpa; file `.env` service dimuat langsung oleh Compose.
 
+Deploy ditolak jika nama project yang sama sudah terdaftar dari file Compose deployment atau container Docker (termasuk container yang sedang berhenti). Proses deploy yang berjalan bersamaan untuk project yang sama juga dikunci dan ditolak, termasuk dari Deploy Hub. Untuk mencegah ekstraksi arsip menimpa isi tujuan, arsip hanya dapat diekstrak ke folder tujuan yang belum ada.
+
 ### 2. Menghentikan & Membersihkan Container
 
 ```bash

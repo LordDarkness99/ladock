@@ -12,7 +12,7 @@
     "summary": "Skrip pengelola MySQL sentral yang menyiapkan network/container, memigrasikan data ke bind mount lokal, membersihkan symlink socket stale sebelum/sesudah startup dan saat stop, menangani container restarting, serta menunggu kesiapan database."
   },
   "deploy.sh": {
-    "summary": "Entry point deployment LaDock yang memilih port HTTP kosong otomatis, membaca ulang kredensial DB hanya dari .env, mempertahankan key aplikasi tanpa membuat ulang nilai yang tersedia, dan mengarahkan service ke MySQL sentral."
+    "summary": "Entry point deployment LaDock yang memilih port HTTP kosong otomatis, menolak project duplikat/parallel deployment, membaca kredensial DB hanya dari .env, dan mengarahkan service ke MySQL sentral."
   },
   "destroy.sh": {
     "summary": "Skrip untuk menemukan project berdasarkan nama atau path dan menghentikan container Compose aplikasi/database pada layout baru maupun legacy, dengan opsi menghapus image."
@@ -74,6 +74,9 @@
   "scripts/env_config.py": {
     "summary": "Membaca dan memperbarui variabel dotenv tanpa mengeksekusi isinya, mempertahankan nilai aplikasi yang tidak terkait dan mendukung kredensial dengan karakter khusus."
   },
+  "scripts/check_duplicate_deploy.py": {
+    "summary": "Mendeteksi deployment proyek yang sudah ada melalui file Compose atau nama container, termasuk deployment lama di direktori legacy."
+  },
   "scripts/find_free_ports.py": {
     "summary": "Memeriksa port TCP yang terpakai oleh proses host dan binding Docker, lalu mencari port kosong mulai dari port awal dengan kenaikan satu dan mendukung port yang dikecualikan."
   },
@@ -133,6 +136,9 @@
   },
   "tests/test_env_config.py": {
     "summary": "Tes pembacaan nilai dotenv tanpa eksekusi, preservasi APP_KEY, dan round-trip password dengan karakter khusus."
+  },
+  "tests/test_check_duplicate_deploy.py": {
+    "summary": "Tes normalisasi slug dan deteksi marker/container deployment agar project yang sama tidak ter-deploy dua kali."
   },
   "tests/test_find_free_ports.py": {
     "summary": "Tes pemilihan port kosong, port pengecualian, kondisi kehabisan port, dan parsing binding port Docker IPv4/IPv6."

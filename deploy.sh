@@ -55,6 +55,8 @@ MAX_DEPTH=5
 BASE_APP_PORT=""
 BASE_APP_PORT_CUSTOM=0
 MEMORY_LIMIT="$DEFAULT_MEMORY_LIMIT"
+LOCKED_PROJECT_SLUG=""
+PROJECT_LOCK_FD=""
 
 for arg in "$@"; do
   case "$arg" in
@@ -130,6 +132,9 @@ Flags:
   --max-depth=N      Kedalaman scan microservice (default: 5)
   --base-app-port=N  Port awal direct-access service microservice
   --memory-limit=SIZE Batas memori untuk setiap service (default: $DEFAULT_MEMORY_LIMIT; contoh: 1G)
+
+Nama project yang sudah pernah di-deploy ditolak untuk mencegah deployment duplikat.
+Deploy bersamaan dengan nama project yang sama juga ditolak.
 EOF
 }
 
@@ -162,6 +167,53 @@ report_skipped_ports() {
   local skipped
   skipped="$(python3 -c 'import json, sys; print(", ".join(map(str, json.load(sys.stdin)["skipped"])))')"
   [[ -z "$skipped" ]] || info "Port terpakai/dikecualikan dan dilewati: $skipped"
+}
+
+acquire_project_lock() {
+  local slug="$1" lock_key lock_file
+  if [[ -z "$slug" ]]; then
+    echo "❌ Slug project kosong; deploy dibatalkan demi mencegah duplikasi." >&2
+    return 1
+  fi
+  [[ "$LOCKED_PROJECT_SLUG" == "$slug" ]] && return 0
+  if ! command -v flock >/dev/null 2>&1; then
+    echo "❌ Perintah flock tidak ditemukan; deploy dibatalkan demi mencegah deployment bersamaan." >&2
+    return 1
+  fi
+  lock_key="$(python3 -c 'import hashlib, sys; print(hashlib.sha256("\0".join(sys.argv[1:]).encode()).hexdigest())' \
+    "$SCRIPT_DIR" "$DEFAULT_DEPLOY_ROOT" "$slug")"
+  mkdir -p /tmp/ladock-deploy-locks
+  lock_file="/tmp/ladock-deploy-locks/${lock_key}.lock"
+  exec {PROJECT_LOCK_FD}>"$lock_file"
+  if ! flock -n "$PROJECT_LOCK_FD"; then
+    echo "❌ Deploy project '$slug' sedang berjalan di proses lain; deployment duplikat dibatalkan." >&2
+    return 1
+  fi
+  LOCKED_PROJECT_SLUG="$slug"
+}
+
+check_duplicate_deploy() {
+  local slug="$1" container_names guard_result deployed
+  acquire_project_lock "$slug"
+  if ! container_names="$(docker ps -a --format '{{.Names}}')"; then
+    echo "❌ Gagal memeriksa container Docker; deploy dibatalkan demi mencegah duplikasi." >&2
+    return 1
+  fi
+  if ! guard_result="$(
+    printf '%s\n' "$container_names" |
+      python3 "$SCRIPTS_DIR/check_duplicate_deploy.py" \
+        --slug "$slug" \
+        --deploy-root "$DEFAULT_DEPLOY_ROOT" \
+        --legacy-root "$SCRIPT_DIR/docker"
+  )"; then
+    echo "❌ Gagal memeriksa status deployment project '$slug'." >&2
+    return 1
+  fi
+  deployed="$(python3 -c 'import json, sys; print(str(json.load(sys.stdin)["deployed"]).lower())' <<<"$guard_result")"
+  if [[ "$deployed" == "true" ]]; then
+    echo "❌ Project '$slug' sudah pernah di-deploy. Deployment duplikat dibatalkan; hapus deployment lama terlebih dahulu sebelum mencoba lagi." >&2
+    return 1
+  fi
 }
 
 stop_existing_container() {
@@ -213,8 +265,14 @@ if [[ -n "$ARCHIVE_FILE" ]]; then
     fi
   fi
 
+  ARCHIVE_DEST="$(python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$ARCHIVE_DEST")"
   RAW_EXTRACT_APP="$(basename "$ARCHIVE_DEST")"
   CLEAN_EXTRACT_APP="$(echo "$RAW_EXTRACT_APP" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g' | sed -E 's/^_+|_+$//g')"
+  check_duplicate_deploy "$CLEAN_EXTRACT_APP"
+  if [[ -e "$ARCHIVE_DEST" ]]; then
+    echo "❌ Folder tujuan arsip sudah ada: $ARCHIVE_DEST. Pilih tujuan baru agar data tidak tertimpa." >&2
+    exit 1
+  fi
   CENTRAL_DB_DIR="$SCRIPT_DIR/mysql/db/$CLEAN_EXTRACT_APP"
   mkdir -p "$CENTRAL_DB_DIR"
 
@@ -262,13 +320,18 @@ if [[ "$DEPLOY_MODE" != "monolith" ]]; then
   fi
 fi
 
+RAW_NAME="$(basename "$PROJECT_PATH")"
+PROJECT_NAME="$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g' | sed -E 's/^_+|_+$//g')"
+if [[ -z "$PROJECT_NAME" ]]; then
+  echo "❌ Nama project tidak valid setelah normalisasi: '$RAW_NAME'." >&2
+  exit 1
+fi
+check_duplicate_deploy "$PROJECT_NAME"
+
 # ==============================================================================
 # ██████████████████████  MODE MONOLITH  █████████████████████████████████████
 # ==============================================================================
 if [[ "$DEPLOY_MODE" == "monolith" ]]; then
-
-  RAW_NAME="$(basename "$PROJECT_PATH")"
-  PROJECT_NAME="$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g' | sed -E 's/^_+|_+$//g')"
 
   stop_existing_container "${PROJECT_NAME}_app"
   stop_existing_container "app_${PROJECT_NAME}"
@@ -604,8 +667,6 @@ if [[ ${#SVC_NAMES[@]} -eq 0 ]]; then
   exit 1
 fi
 
-RAW_NAME="$(basename "$PROJECT_PATH")"
-PROJECT_NAME="$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g' | sed -E 's/^_+|_+$//g')"
 SOURCE_PROJECT_PATH="$PROJECT_PATH"
 PROJECT_PATH="$DEFAULT_DEPLOY_ROOT/$PROJECT_NAME"
 LEGACY_PROJECT_PATH="$SCRIPT_DIR/docker/$PROJECT_NAME"
