@@ -25,11 +25,13 @@ DEFAULT_DEPLOY_ROOT="$SCRIPT_DIR/docker/apps"
 DEFAULT_MONOLITH_PORT=8080
 DEFAULT_BASE_APP_PORT=8081
 DEFAULT_DB_PORT=3308
+DEFAULT_MEMORY_LIMIT=512M
 
 if [[ -f "$CONFIG_FILE" ]] && command -v python3 >/dev/null 2>&1; then
   DEFAULT_DEPLOY_ROOT="$(python3 -c "import json, os; d=json.load(open('$CONFIG_FILE')); r=d.get('deploy_root', '$DEFAULT_DEPLOY_ROOT'); print(os.path.abspath(os.path.join('$SCRIPT_DIR', r)) if not os.path.isabs(r) else r)" 2>/dev/null || echo "$DEFAULT_DEPLOY_ROOT")"
   DEFAULT_MONOLITH_PORT="$(python3 -c "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('default_ports', {}).get('monolith_http', $DEFAULT_MONOLITH_PORT))" 2>/dev/null || echo "$DEFAULT_MONOLITH_PORT")"
   DEFAULT_BASE_APP_PORT="$(python3 -c "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('default_ports', {}).get('base_app_port', $DEFAULT_BASE_APP_PORT))" 2>/dev/null || echo "$DEFAULT_BASE_APP_PORT")"
+  DEFAULT_MEMORY_LIMIT="$(python3 -c "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('resources', {}).get('memory_limit', '$DEFAULT_MEMORY_LIMIT'))" 2>/dev/null || echo "$DEFAULT_MEMORY_LIMIT")"
 fi
 
 # ── Parse flags & positional args ────────────────────────────────────────────
@@ -42,6 +44,7 @@ ARCHIVE_DEST=""
 DEPLOY_MODE=""        # "" | "monolith" | "microservice"
 MAX_DEPTH=5
 BASE_APP_PORT="$DEFAULT_BASE_APP_PORT"
+MEMORY_LIMIT="$DEFAULT_MEMORY_LIMIT"
 
 for arg in "$@"; do
   case "$arg" in
@@ -56,9 +59,15 @@ for arg in "$@"; do
     --mode=*)          DEPLOY_MODE="${arg#--mode=}" ;;
     --max-depth=*)     MAX_DEPTH="${arg#--max-depth=}" ;;
     --base-app-port=*) BASE_APP_PORT="${arg#--base-app-port=}" ;;
+    --memory-limit=*)  MEMORY_LIMIT="${arg#--memory-limit=}" ;;
     *) ARGS+=("$arg") ;;
   esac
 done
+
+if [[ ! "$MEMORY_LIMIT" =~ ^[1-9][0-9]*([.][0-9]+)?([bBkKmMgG]|[kKmMgG][bB])?$ ]]; then
+  echo "❌ Batas memori tidak valid: '$MEMORY_LIMIT'. Gunakan ukuran seperti 512M atau 1G." >&2
+  exit 1
+fi
 
 # Deteksi otomatis jika argumen pertama adalah file arsip (.zip, .tar.gz, dll.)
 FIRST_ARG="${ARGS[0]:-}"
@@ -109,6 +118,7 @@ Flags:
   --mode=MODE        Paksa mode: 'monolith' atau 'microservice'
   --max-depth=N      Kedalaman scan microservice (default: 5)
   --base-app-port=N  Port awal direct-access per service (default: 8081)
+  --memory-limit=SIZE Batas memori untuk setiap service (default: $DEFAULT_MEMORY_LIMIT; contoh: 1G)
 EOF
 }
 
@@ -356,6 +366,7 @@ EOF
 
   sed -e "s/__PROJECT__/$PROJECT_NAME/g" \
       -e "s/__HTTP_PORT__/$HTTP_PORT/g" \
+      -e "s/__MEMORY_LIMIT__/$MEMORY_LIMIT/g" \
       -e "s/__DB_NAME__/$DB_NAME/g" \
       -e "s/__DB_USER__/$DB_USER/g" \
       -e "s/__DB_PASS__/$DB_PASS/g" \
@@ -675,6 +686,7 @@ python3 "$SCRIPTS_DIR/generate_compose.py" \
   --gateway-port      "$GATEWAY_PORT" \
   --db-port           "$DB_PORT" \
   --db-data-root      "$SCRIPT_DIR/docker/db" \
+  --memory-limit      "$MEMORY_LIMIT" \
   --db-root-pass      "$DB_ROOT_PASS" \
   --php-versions      "$PHP_VERS_ARG" \
   --composer-versions "$COMP_VERS_ARG" \

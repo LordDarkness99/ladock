@@ -62,17 +62,24 @@ ensure_central_db() {
     local_real="$(realpath "$LOCAL_DATA_DIR")"
 
     if [[ "$mount_type" == "bind" && "$mount_source" == "$local_real" ]]; then
-      socket_config_source="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/etc/mysql/conf.d/ladock.cnf"}}{{.Source}}{{end}}{{end}}' "$CONTAINER_NAME")"
+      socket_config_source="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/etc/mysql/conf.d/ladock-socket.cnf"}}{{.Source}}{{end}}{{end}}' "$CONTAINER_NAME")"
       if [[ "$socket_config_source" != "$SCRIPT_DIR/templates/mysql-central.cnf" ]]; then
         log "Memperbarui konfigurasi socket MySQL tanpa memindahkan datadir..."
-        if [[ "$(docker inspect --format '{{.State.Running}}' "$CONTAINER_NAME")" == "true" ]]; then
+        local container_status
+        container_status="$(docker inspect --format '{{.State.Status}}' "$CONTAINER_NAME")"
+        if [[ "$container_status" == "running" || "$container_status" == "restarting" || "$container_status" == "paused" ]]; then
           docker stop "$CONTAINER_NAME" >/dev/null
         fi
         docker rm "$CONTAINER_NAME" >/dev/null
         container_exists=0
         remove_stale_socket_link
       else
-        if [[ "$(docker inspect --format '{{.State.Running}}' "$CONTAINER_NAME")" != "true" ]]; then
+        local container_status
+        container_status="$(docker inspect --format '{{.State.Status}}' "$CONTAINER_NAME")"
+        if [[ "$container_status" != "running" ]]; then
+          if [[ "$container_status" == "restarting" ]]; then
+            docker stop "$CONTAINER_NAME" >/dev/null
+          fi
           remove_stale_socket_link
           log "Menyalakan kembali Database Sentral '$CONTAINER_NAME'..."
           docker start "$CONTAINER_NAME" >/dev/null
@@ -136,7 +143,7 @@ ensure_central_db() {
       --network "$NETWORK_NAME" \
       -p "${DB_PORT}:3306" \
       -v "$LOCAL_DATA_DIR:/var/lib/mysql" \
-      -v "$SCRIPT_DIR/templates/mysql-central.cnf:/etc/mysql/conf.d/ladock.cnf:ro" \
+      -v "$SCRIPT_DIR/templates/mysql-central.cnf:/etc/mysql/conf.d/ladock-socket.cnf:ro" \
       -e MYSQL_ROOT_PASSWORD="$ROOT_PASS" \
       mysql:8.0 \
       --default-authentication-plugin=mysql_native_password >/dev/null
@@ -153,6 +160,7 @@ ensure_central_db() {
     fi
     sleep 2; elapsed=$((elapsed+2))
   done
+  remove_stale_socket_link
   log "Database Sentral MySQL ('$CONTAINER_NAME') SIAP!"
 }
 
@@ -163,9 +171,10 @@ case "${1:-start}" in
   stop)
     log "Menghentikan Database Sentral '$CONTAINER_NAME'..."
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
+    remove_stale_socket_link
     ;;
   status)
-    docker ps --filter "name=$CONTAINER_NAME"
+    docker ps -a --filter "name=$CONTAINER_NAME"
     ;;
   *)
     echo "Usage: $0 {start|stop|status}"

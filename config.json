@@ -17,6 +17,9 @@
     "gateway_http": 8080,
     "base_app_port": 8081
   },
+  "resources": {
+    "memory_limit": "512M"
+  },
   "paths": {
     "templates_dir": "templates",
     "scripts_dir": "scripts",

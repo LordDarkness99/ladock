@@ -219,6 +219,7 @@ async function handleDeploySubmit(event) {
   const dbPort = document.getElementById('deploy-db-port').value.trim();
   const phpVer = document.getElementById('deploy-php-ver').value.trim();
   const mode = document.getElementById('deploy-mode').value;
+  const memoryLimit = document.getElementById('deploy-memory-limit').value.trim();
   const forceImport = document.getElementById('deploy-force-import').checked;
   const skipImport = document.getElementById('deploy-skip-import').checked;
 
@@ -234,6 +235,7 @@ async function handleDeploySubmit(event) {
     db_port: dbPort,
     php_version: phpVer || undefined,
     mode: mode || undefined,
+    memory_limit: memoryLimit || undefined,
     force_import: forceImport,
     skip_import: skipImport
   };

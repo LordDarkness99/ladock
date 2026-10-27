@@ -338,6 +338,12 @@ const server = http.createServer(async (req, res) => {
     req.on('end', () => {
       try {
         const params = JSON.parse(body || '{}');
+        if (params.memory_limit !== undefined && params.memory_limit !== '' &&
+            (typeof params.memory_limit !== 'string' ||
+             !/^[1-9]\d*(?:\.\d+)?(?:[bBkKmMgG]|[kKmMgG][bB])?$/.test(params.memory_limit))) {
+          sendError(res, 'Batas memori tidak valid. Gunakan ukuran seperti 512M atau 1G.', 400);
+          return;
+        }
         const deployId = 'deploy_' + Date.now();
         const logPath = path.join(LOGS_DIR, `${deployId}.log`);
 
@@ -352,6 +358,7 @@ const server = http.createServer(async (req, res) => {
         if (params.force_import) cmdArgs.push('--force-import');
         if (params.skip_import) cmdArgs.push('--skip-import');
         if (params.mode) cmdArgs.push(`--mode=${params.mode}`);
+        if (params.memory_limit) cmdArgs.push(`--memory-limit=${params.memory_limit}`);
 
         const deployScript = path.join(ROOT_DIR, 'deploy.sh');
         const proc = spawn('bash', [deployScript, ...cmdArgs], { cwd: ROOT_DIR });

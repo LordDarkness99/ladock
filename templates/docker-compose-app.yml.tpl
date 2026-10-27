@@ -8,6 +8,7 @@ services:
         COMPOSER_VERSION: "__COMPOSER_VERSION__"
     container_name: __PROJECT___app
     restart: unless-stopped
+    mem_limit: __MEMORY_LIMIT__
     working_dir: /var/www
     ports:
       - "__HTTP_PORT__:80"

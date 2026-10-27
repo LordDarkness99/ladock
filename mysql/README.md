@@ -13,7 +13,7 @@ Container MySQL berjalan sebagai user internal `mysql`; beberapa file datadir mu
 
 Pada penggunaan pertama setelah perubahan, `central_db.sh` menyalin datadir dari named volume lama saat container berhenti. Named volume lama tidak dihapus. Jika folder tujuan lokal sudah berisi file tetapi container lama masih memakai penyimpanan berbeda, migrasi berhenti agar tidak menimpa data.
 
-Socket lokal MySQL dikonfigurasi ke `/var/lib/mysql/mysql.sock` agar image tidak membuat symlink socket lama di datadir. Saat konfigurasi ini pertama kali diterapkan, `central_db.sh` akan mengganti container lama tanpa menghapus data di folder `docker/db/ladock_mysql/data/`. Datadir lama di `docker/ladock_mysql/data/` akan disalin ke lokasi baru saat aman.
+Socket MySQL menggunakan lokasi runtime container `/var/run/mysqld/mysqld.sock`, bukan datadir bind mount. Ini mencegah MySQL gagal mengubah kepemilikan file socket pada host. Symlink kompatibilitas `mysql.sock` yang dibuat image dibersihkan setelah MySQL siap dan saat dihentikan/dimulai ulang, agar startup berikutnya tidak gagal mengubah kepemilikan socket pada bind mount; isi database tidak dihapus.
 
 ## Manajemen Dump & Backup Terstruktur (`mysql/db/<app_name>/`)
 

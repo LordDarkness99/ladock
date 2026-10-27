@@ -118,7 +118,12 @@ chmod +x deploy.sh destroy.sh central_db.sh monitor.sh
 
 # Dengan Opsi Lengkap:
 ./deploy.sh --archive=/path/arsip.zip --dest=./docker/apps/myapp 8080 3308 --force-import
+
+# Override batas memori default (512M) untuk setiap service saat deploy:
+./deploy.sh /path/ke/folder-project 8080 3308 --memory-limit=1G
 ```
+
+Batas memori default dikonfigurasi melalui `resources.memory_limit` di `config.json` (default `512M`). Opsi `--memory-limit=SIZE` dapat digunakan untuk mengatur batas custom secara seragam pada setiap service aplikasi, gateway, dan database microservice. Dashboard Deploy Hub menyediakan kolom yang sama; jika dibiarkan kosong, nilai default konfigurasi digunakan.
 
 ### 2. Menghentikan & Membersihkan Container
 

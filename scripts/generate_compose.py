@@ -19,6 +19,16 @@ Usage:
 import argparse
 import sys
 import os
+import re
+
+
+MEMORY_LIMIT_PATTERN = re.compile(r"[1-9][0-9]*(?:\.[0-9]+)?(?:[bBkKmMgG]|[kKmMgG][bB])?")
+
+
+def _validate_memory_limit(value: str) -> str:
+    if not MEMORY_LIMIT_PATTERN.fullmatch(value):
+        raise ValueError(f"Batas memori tidak valid: {value!r}. Gunakan ukuran seperti 512M atau 1G.")
+    return value
 
 
 def _pairs(raw: str) -> dict[str, str]:
@@ -42,7 +52,9 @@ def build_db_compose(
     db_creds: dict,
     db_root_pass: str,
     db_data_root: str = "../../db",
+    memory_limit: str = "512M",
 ) -> str:
+    memory_limit = _validate_memory_limit(memory_limit)
     lines: list[str] = ["services:"]
 
     for idx, svc in enumerate(services):
@@ -59,6 +71,7 @@ def build_db_compose(
             f"    image: mysql:8.0",
             f"    container_name: {project}_{sname}_db",
             f"    restart: unless-stopped",
+            f"    mem_limit: {memory_limit}",
             f"    command: --default-authentication-plugin=mysql_native_password",
             f"    environment:",
             f'      MYSQL_ROOT_PASSWORD: "{db_root_pass}"',
@@ -97,7 +110,9 @@ def build_app_compose(
     composer_versions: dict[str, str],
     service_paths: dict[str, str] | None = None,
     docker_dir: str = ".docker",
+    memory_limit: str = "512M",
 ) -> str:
+    memory_limit = _validate_memory_limit(memory_limit)
     lines: list[str] = ["services:"]
 
     # Gateway
@@ -109,6 +124,7 @@ def build_app_compose(
         f"      dockerfile: Dockerfile",
         f"    container_name: {project}_gateway",
         f"    restart: unless-stopped",
+        f"    mem_limit: {memory_limit}",
         f"    ports:",
         f'      - "{gateway_port}:80"',
         f"    volumes:",
@@ -148,6 +164,7 @@ def build_app_compose(
             f'        COMPOSER_VERSION: "{comp_ver}"',
             f"    container_name: {project}_{sname}_app",
             f"    restart: unless-stopped",
+            f"    mem_limit: {memory_limit}",
             f"    working_dir: /var/www",
             f"    ports:",
             f'      - "{http_port}:80"',
@@ -187,6 +204,8 @@ def main():
     ap.add_argument("--db-port",           required=True, type=int)
     ap.add_argument("--db-data-root",      default="../../db",
                     help="Folder root datadir DB untuk project ini")
+    ap.add_argument("--memory-limit",      type=_validate_memory_limit, default="512M",
+                    help="Batas memori untuk setiap service (contoh: 512M, 1G)")
     ap.add_argument("--db-root-pass",      required=True)
     ap.add_argument("--php-versions",      default="",   help="'name1:phpver,name2:phpver,...'")
     ap.add_argument("--composer-versions", default="",   help="'name1:compver,...'")
@@ -225,6 +244,7 @@ def main():
         db_creds=db_creds,
         db_root_pass=args.db_root_pass,
         db_data_root=args.db_data_root,
+        memory_limit=args.memory_limit,
     )
 
     app_yaml = build_app_compose(
@@ -236,6 +256,7 @@ def main():
         composer_versions=composer_versions,
         service_paths=service_paths,
         docker_dir=args.docker_dir,
+        memory_limit=args.memory_limit,
     )
 
     db_file_path = os.path.join(args.output_dir, ".docker-compose-db.yml")

@@ -3,6 +3,7 @@ services:
     image: mysql:8.0
     container_name: __PROJECT___db
     restart: unless-stopped
+    mem_limit: 512M
     command: --default-authentication-plugin=mysql_native_password
     environment:
       MYSQL_DATABASE: "__DB_NAME__"
