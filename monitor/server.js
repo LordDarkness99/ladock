@@ -8,7 +8,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { spawn, execSync } = require('child_process');
+const { spawn, execSync, execFileSync } = require('child_process');
 const url = require('url');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -35,7 +35,7 @@ function loadConfig() {
     deploy_root: './docker/apps',
     central_db: {
       container_name: 'ladock_mysql',
-      port: 3308,
+      port: 3310,
       volume_name: 'ladock_db_central_data'
     },
     dashboard: { port: 9090, auth_enabled: false, auth_token: 'admin123' }
@@ -153,7 +153,7 @@ function getClusterStatus() {
   const centralDbStatus = {
     container_name: dbContainerName,
     running: centralDbContainer ? centralDbContainer.is_running : false,
-    port: (cfg.central_db && cfg.central_db.port) || 3308,
+    port: (cfg.central_db && cfg.central_db.port) || 3310,
     volume_name: (cfg.central_db && cfg.central_db.volume_name) || 'ladock_db_central_data',
     network: (cfg.central_db && cfg.central_db.network) || 'ladock_net'
   };
@@ -320,6 +320,33 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === '/api/ports/available' && method === 'GET') {
+    const cfg = loadConfig();
+    const defaultStart = Number(cfg.default_ports?.gateway_http || 8080);
+    const startPort = parsedUrl.query.start === undefined
+      ? defaultStart
+      : Number(parsedUrl.query.start);
+    if (!Number.isInteger(startPort) || startPort < 1024 || startPort > 65535) {
+      sendError(res, 'Port awal harus berupa angka antara 1024 dan 65535.', 400);
+      return;
+    }
+
+    try {
+      const helper = path.join(ROOT_DIR, 'scripts', 'find_free_ports.py');
+      const result = execFileSync('python3', [
+        helper,
+        '--start', String(startPort),
+        '--count', '1',
+        '--exclude', String(cfg.central_db?.port || 3310)
+      ], { cwd: ROOT_DIR, encoding: 'utf8', timeout: 5000 });
+      sendJSON(res, JSON.parse(result));
+    } catch (err) {
+      console.error('Error checking available deploy ports:', err.message);
+      sendError(res, 'Gagal memeriksa port. Pastikan Docker dan Python tersedia.', 500);
+    }
+    return;
+  }
+
   // 4. API: Upload Arsip (.zip, .tar.gz, dll.)
   if (pathname === '/api/upload' && method === 'POST') {
     try {
@@ -351,7 +378,7 @@ const server = http.createServer(async (req, res) => {
         if (params.archive) cmdArgs.push(`--archive=${params.archive}`);
         else if (params.path) cmdArgs.push(params.path);
 
-        if (params.http_port) cmdArgs.push(String(params.http_port));
+        cmdArgs.push(String(params.http_port || 'auto'));
         if (params.db_port) cmdArgs.push(String(params.db_port));
         if (params.php_version) cmdArgs.push(String(params.php_version));
 

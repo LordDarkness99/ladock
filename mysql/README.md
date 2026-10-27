@@ -2,7 +2,7 @@
 
 ## Arsitektur Penyimpanan Database
 
-Container Database Sentral LaDock (`ladock_mysql`) berjalan pada port host **3308** (internal **3306**) di dalam network **`ladock_net`**.
+Container Database Sentral LaDock (`ladock_mysql`) berjalan pada port host **3310** (internal **3306**) di dalam network **`ladock_net`**. Aplikasi monolith dan semua service microservice memakai server sentral ini; setiap microservice memiliki database dan kredensial tersendiri.
 Data fisik MySQL disimpan pada folder lokal repo melalui bind mount:
 
 ```text
@@ -38,7 +38,7 @@ mysql/
 ### 1. Langsung dari Host CLI
 
 ```bash
-mysql -h 127.0.0.1 -P 3308 -u <db_user> -p<db_password> <db_name>
+mysql -h 127.0.0.1 -P 3310 -u <db_user> -p<db_password> <db_name>
 ```
 
 ### 2. Dari Dalam Container Docker
@@ -79,4 +79,4 @@ Hasil backup otomatis disimpan di `mysql/db/<app_name>/data.sql`, `schema.sql`, 
 
 Script akan membaca `mysql/db/<app_name>/data.sql` dan mengimpornya kembali ke database container `ladock_mysql`.
 
-Datadir tiap database microservice berada di `docker/db/<project>/<service>/data/`. Pada deploy ulang, data dari named volume lama disalin saat container berhenti; named volume tersebut tidak dihapus dan dipertahankan sebagai cadangan.
+Database microservice dari deployment lama tidak otomatis dipindahkan ke server sentral. Container lama dihentikan saat deploy ulang, tetapi folder datadir dan Docker named volume lamanya tetap dipertahankan untuk migrasi manual.

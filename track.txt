@@ -2,9 +2,9 @@
 ./destroy.sh path port port
 example:
 ./deploy.sh /home/nizar/Documents/myCode/maDiskominfo/ujicoba/servismobil-webapi-laravel8/
-./destroy.sh /home/nizar/Documents/myCode/maDiskominfo/ujicoba/CampusCare/ 8081 3308
+./destroy.sh /home/nizar/Documents/myCode/maDiskominfo/ujicoba/CampusCare/
 
-mysql -h 127.0.0.1 -P 3307 -u travel_agency_admin__user -p
+mysql -h 127.0.0.1 -P 3310 -u travel_agency_admin__user -p
 
 docker run -d --name ladock_phpmyadmin --restart unless-stopped --network ladock_net -p 8095:80 -e PMA_HOST=ladock_mysql phpmyadmin/phpmyadmin
 
@@ -12,14 +12,14 @@ docker run -d --name ladock_phpmyadmin --restart unless-stopped --network ladock
 
 ./destroy.sh jatimfair2022
 # atau: ./destroy.sh deployed/jatimfair2022
-./deploy.sh --cpmove=/home/nizar/Documents/summy/cpmove-jatimfair2022.tar.gz 8083 3308
+./deploy.sh --cpmove=/home/nizar/Documents/summy/cpmove-jatimfair2022.tar.gz 8083 3310
 ./scripts/db_restore.sh jatimfair2022
 ./scripts/db_dump.sh jatimfair2022 jatimfair2022_db
 
 ./deploy.sh /home/nizar/Documents/summy/uji/event-management-system-main
 ./destroy.sh /home/nizar/Documents/summy/uji/event-management-system-main
 
-./deploy.sh /home/nizar/Documents/summy/uji/Student-Event-Management-Web-Application-main 8086 3308
+./deploy.sh /home/nizar/Documents/summy/uji/Student-Event-Management-Web-Application-main 8086 3310
 ./destroy.sh /home/nizar/Documents/summy/uji/Student-Event-Management-Web-Application-main
 
 # Web Dashboard & Monitoring (Microservice & Monolith):

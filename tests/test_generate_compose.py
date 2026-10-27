@@ -1,21 +1,6 @@
 import pytest
 
-from scripts.generate_compose import build_app_compose, build_db_compose
-
-
-def test_db_compose_uses_separate_database_data_directory():
-    compose = build_db_compose(
-        project="sample",
-        services=[{"name": "web", "http_port": 8081}],
-        base_db_port=3308,
-        db_creds={},
-        db_root_pass="root-secret",
-    )
-
-    assert "../../db/sample/web/data:/var/lib/mysql" in compose
-    assert "sample_web_dbdata" not in compose
-    assert "\nvolumes:\n" not in compose
-    assert "mem_limit: 512M" in compose
+from scripts.generate_compose import build_app_compose
 
 
 def test_memory_limit_is_applied_to_every_microservice_container():
@@ -23,14 +8,6 @@ def test_memory_limit_is_applied_to_every_microservice_container():
         {"name": "web", "http_port": 8081},
         {"name": "api", "http_port": 8082},
     ]
-    db_compose = build_db_compose(
-        project="sample",
-        services=services,
-        base_db_port=3308,
-        db_creds={},
-        db_root_pass="root-secret",
-        memory_limit="1G",
-    )
     app_compose = build_app_compose(
         project="sample",
         services=services,
@@ -41,7 +18,6 @@ def test_memory_limit_is_applied_to_every_microservice_container():
         memory_limit="1G",
     )
 
-    assert db_compose.count("mem_limit: 1G") == len(services)
     assert app_compose.count("mem_limit: 1G") == len(services) + 1
 
 
@@ -62,13 +38,34 @@ def test_default_memory_limit_is_applied_to_gateway_and_app_services():
     assert app_compose.count("mem_limit: 512M") == len(services) + 1
 
 
+def test_microservices_connect_to_central_database_on_shared_network():
+    app_compose = build_app_compose(
+        project="sample",
+        services=[{"name": "web", "http_port": 8081}],
+        gateway_port=8080,
+        db_creds={"web": {"db_name": "sample_web_db", "db_user": "sample_web", "db_pass": "secret"}},
+        php_versions={},
+        composer_versions={},
+        central_db_host="central_mysql",
+        central_db_network="shared_net",
+    )
+
+    assert 'DB_HOST: "central_mysql"' in app_compose
+    assert 'DB_PORT: "3306"' in app_compose
+    assert app_compose.count("      - shared_net") == 2
+    assert "db_web:" not in app_compose
+    assert 'name: shared_net' in app_compose
+    assert "3308:3306" not in app_compose
+
+
 def test_invalid_memory_limit_is_rejected():
     with pytest.raises(ValueError, match="Batas memori tidak valid"):
-        build_db_compose(
+        build_app_compose(
             project="sample",
             services=[{"name": "web", "http_port": 8081}],
-            base_db_port=3308,
+            gateway_port=8080,
             db_creds={},
-            db_root_pass="root-secret",
+            php_versions={},
+            composer_versions={},
             memory_limit="512M; other: value",
         )

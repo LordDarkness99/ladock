@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generator dinamis untuk docker-compose-db.yml dan docker-compose-app.yml mode Microservices.
+Generator dinamis untuk docker-compose-app.yml mode Microservices.
 
 Usage:
     python3 generate_compose.py \
@@ -9,15 +9,15 @@ Usage:
         --service-paths '<name1>:/abs/path1,<name2>:/abs/path2,...' \
         --docker-dir  /abs/path/to/.docker \
         --gateway-port <port>  \
-        --db-port     <port>   \
         --php-versions '<name1>:<phpver1>,<name2>:<phpver2>,...' \
         --composer-versions '<name1>:<compver1>,...' \
         --db-creds '<name1>:<dbname>:<dbuser>:<dbpass>|...' \
+        --central-db-host <container_name> \
+        --central-db-network <network_name> \
         --output-dir /abs/path/to/project
 """
 
 import argparse
-import sys
 import os
 import re
 
@@ -45,62 +45,6 @@ def _pairs(raw: str) -> dict[str, str]:
     return result
 
 
-def build_db_compose(
-    project: str,
-    services: list[dict],
-    base_db_port: int,
-    db_creds: dict,
-    db_root_pass: str,
-    db_data_root: str = "../../db",
-    memory_limit: str = "512M",
-) -> str:
-    memory_limit = _validate_memory_limit(memory_limit)
-    lines: list[str] = ["services:"]
-
-    for idx, svc in enumerate(services):
-        sname = svc["name"]
-        svc_db_port = base_db_port + idx
-        creds = db_creds.get(sname, {})
-        db_name = creds.get("db_name", f"{sname}_db")
-        db_user = creds.get("db_user", f"{sname}_user")
-        db_pass = creds.get("db_pass", "secret")
-
-        lines += [
-            "",
-            f"  db_{sname}:",
-            f"    image: mysql:8.0",
-            f"    container_name: {project}_{sname}_db",
-            f"    restart: unless-stopped",
-            f"    mem_limit: {memory_limit}",
-            f"    command: --default-authentication-plugin=mysql_native_password",
-            f"    environment:",
-            f'      MYSQL_ROOT_PASSWORD: "{db_root_pass}"',
-            f'      MYSQL_DATABASE: "{db_name}"',
-            f'      MYSQL_USER: "{db_user}"',
-            f'      MYSQL_PASSWORD: "{db_pass}"',
-            f"    ports:",
-            f'      - "{svc_db_port}:3306"',
-            f"    volumes:",
-            f"      - {os.path.join(db_data_root, project, sname, 'data')}:/var/lib/mysql",
-            f"    networks:",
-            f"      - {project}_net",
-            f"    healthcheck:",
-            f'      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p{db_root_pass}"]',
-            f"      interval: 5s",
-            f"      timeout: 5s",
-            f"      retries: 15",
-        ]
-
-    lines += [
-        "",
-        "networks:",
-        f"  {project}_net:",
-        f"    name: {project}_net",
-    ]
-
-    return "\n".join(lines) + "\n"
-
-
 def build_app_compose(
     project: str,
     services: list[dict],
@@ -111,6 +55,8 @@ def build_app_compose(
     service_paths: dict[str, str] | None = None,
     docker_dir: str = ".docker",
     memory_limit: str = "512M",
+    central_db_host: str = "ladock_mysql",
+    central_db_network: str = "ladock_net",
 ) -> str:
     memory_limit = _validate_memory_limit(memory_limit)
     lines: list[str] = ["services:"]
@@ -135,7 +81,7 @@ def build_app_compose(
         lines.append(f"      - app_{svc['name']}")
     lines += [
         f"    networks:",
-        f"      - {project}_net",
+        f"      - {central_db_network}",
     ]
 
     # Service app containers
@@ -174,20 +120,20 @@ def build_app_compose(
             f"    environment:",
             f'      APP_ENV: "local"',
             f'      DB_CONNECTION: "mysql"',
-            f'      DB_HOST: "db_{sname}"',
+            f'      DB_HOST: "{central_db_host}"',
             f'      DB_PORT: "3306"',
             f'      DB_DATABASE: "{db_name}"',
             f'      DB_USERNAME: "{db_user}"',
             f'      DB_PASSWORD: "{db_pass}"',
             f"    networks:",
-            f"      - {project}_net",
+            f"      - {central_db_network}",
         ]
 
     lines += [
         "",
         "networks:",
-        f"  {project}_net:",
-        f"    name: {project}_net",
+        f"  {central_db_network}:",
+        f"    name: {central_db_network}",
         f"    external: true",
     ]
 
@@ -201,24 +147,21 @@ def main():
     ap.add_argument("--service-paths",     default="",   help="'name1:/path1,name2:/path2,...'")
     ap.add_argument("--docker-dir",        default=".docker", help="Path ke folder .docker/ (absolut)")
     ap.add_argument("--gateway-port",      required=True, type=int)
-    ap.add_argument("--db-port",           required=True, type=int)
-    ap.add_argument("--db-data-root",      default="../../db",
-                    help="Folder root datadir DB untuk project ini")
     ap.add_argument("--memory-limit",      type=_validate_memory_limit, default="512M",
                     help="Batas memori untuk setiap service (contoh: 512M, 1G)")
-    ap.add_argument("--db-root-pass",      required=True)
+    ap.add_argument("--central-db-host",   default="ladock_mysql")
+    ap.add_argument("--central-db-network", default="ladock_net")
     ap.add_argument("--php-versions",      default="",   help="'name1:phpver,name2:phpver,...'")
     ap.add_argument("--composer-versions", default="",   help="'name1:compver,...'")
     ap.add_argument("--db-creds",          default="",
                     help="'svcname:dbname:dbuser:dbpass|...' (pipe-separated per service)")
-    ap.add_argument("--output-dir",        required=True, help="Folder tempat menulis docker-compose-db.yml dan docker-compose-app.yml")
+    ap.add_argument("--output-dir",        required=True, help="Folder tempat menulis docker-compose-app.yml")
     args = ap.parse_args()
 
     svc_ports = _pairs(args.services)
     services = [{"name": n, "http_port": int(p)} for n, p in svc_ports.items()]
     if not services:
-        print("Tidak ada service yang diberikan.", file=sys.stderr)
-        sys.exit(1)
+        ap.error("Tidak ada service yang diberikan.")
 
     php_versions      = _pairs(args.php_versions)
     composer_versions = _pairs(args.composer_versions)
@@ -237,16 +180,6 @@ def main():
 
     service_paths = _pairs(args.service_paths)
 
-    db_yaml = build_db_compose(
-        project=args.project,
-        services=services,
-        base_db_port=args.db_port,
-        db_creds=db_creds,
-        db_root_pass=args.db_root_pass,
-        db_data_root=args.db_data_root,
-        memory_limit=args.memory_limit,
-    )
-
     app_yaml = build_app_compose(
         project=args.project,
         services=services,
@@ -257,18 +190,16 @@ def main():
         service_paths=service_paths,
         docker_dir=args.docker_dir,
         memory_limit=args.memory_limit,
+        central_db_host=args.central_db_host,
+        central_db_network=args.central_db_network,
     )
 
-    db_file_path = os.path.join(args.output_dir, ".docker-compose-db.yml")
     app_file_path = os.path.join(args.output_dir, ".docker-compose-app.yml")
-
-    with open(db_file_path, "w") as f:
-        f.write(db_yaml)
 
     with open(app_file_path, "w") as f:
         f.write(app_yaml)
 
-    print(f"Generated {db_file_path} and {app_file_path}")
+    print(f"Generated {app_file_path}")
 
 
 if __name__ == "__main__":

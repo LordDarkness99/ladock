@@ -16,12 +16,14 @@ CONFIG_FILE="$ROOT_DIR/config.json"
 # Muat kredensial DB Sentral
 CONTAINER_NAME="ladock_mysql"
 ROOT_PASS="3baa6e5d124af02611fd0efb79ae292d"
+HOST_PORT="3310"
 
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$ENV_FILE"
   CONTAINER_NAME="${LADOCK_DB_CONTAINER:-$CONTAINER_NAME}"
   ROOT_PASS="${LADOCK_DB_ROOT_PASS:-$ROOT_PASS}"
+  HOST_PORT="${LADOCK_DB_PORT:-$HOST_PORT}"
 fi
 
 usage() {
@@ -86,7 +88,7 @@ cat > "$OUTPUT_DIR/README.md" <<EOF
 - **Database Name**: \`${DB_NAME}\`
 - **Host Container**: \`${CONTAINER_NAME}\` (datadir lokal: \`docker/db/ladock_mysql/data/\`)
 - **Port Internal**: 3306
-- **Port Host**: 3308
+- **Port Host**: ${HOST_PORT}
 - **Last Backup**: $(date)
 - **Files**:
   - \`schema.sql\` : Struktur tabel, routines, dan triggers

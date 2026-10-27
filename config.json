@@ -2,7 +2,7 @@
   "deploy_root": "./docker/apps",
   "central_db": {
     "container_name": "ladock_mysql",
-    "port": 3308,
+    "port": 3310,
     "volume_name": "ladock_db_central_data",
     "network": "ladock_net",
     "root_password": "3baa6e5d124af02611fd0efb79ae292d"

@@ -22,7 +22,7 @@ Otomasi modern untuk men-deploy aplikasi web dan hasil migrasi cPanel ke Docker 
    - File sementara seperti `.env.bak` tidak lagi dibuat/ditinggalkan.
 4. **Penyimpanan Aplikasi & Database Lokal Terstruktur**:
    - Source aplikasi hasil deployment disimpan di `docker/apps/<app_name>/`.
-   - Data fisik database disimpan terpisah di `docker/db/`: MySQL sentral di `docker/db/ladock_mysql/data/` dan database microservice di `docker/db/<project>/<service>/data/`.
+   - Semua aplikasi memakai satu MySQL sentral (`ladock_mysql`) pada port host 3310; tiap service microservice memiliki schema dan kredensial terpisah.
    - File dump `.sql` diorganisir rapi di **`mysql/db/<app_name>/`** (`data.sql`, `schema.sql`, snapshot bertanggal, dan `README.md`).
    - Tersedia helper script: `./scripts/db_dump.sh` dan `./scripts/db_restore.sh`.
 5. **Web Control Center & Monitoring Dashboard**:
@@ -51,8 +51,7 @@ automasi/
 │   │   └── <app_name>/          <- Aplikasi hasil deployment
 │   │       └── src/             <- Source aplikasi monolith
 │   └── db/
-│       ├── ladock_mysql/data/   <- Datadir fisik MySQL sentral
-│       └── <project>/<service>/data/ <- Datadir database microservice
+│       └── ladock_mysql/data/   <- Datadir fisik MySQL sentral
 ├── mysql/
 │   ├── README.md                <- Dokumentasi penyimpanan DB lokal
 │   └── db/                      <- Folder penyimpanan dump SQL per aplikasi
@@ -110,20 +109,26 @@ docker/apps/<app_name>/
 ```bash
 chmod +x deploy.sh destroy.sh central_db.sh monitor.sh
 
-# Dari File Arsip (.zip / .tar.gz / cpmove):
-./deploy.sh /path/ke/aplikasi.zip 8080 3308
+# Dari File Arsip (.zip / .tar.gz / cpmove), port HTTP otomatis:
+./deploy.sh /path/ke/aplikasi.zip
 
-# Dari Folder Source Code Langsung:
-./deploy.sh /path/ke/folder-project 8080 3308
+# Port eksplisit menjadi titik awal; jika sudah dipakai, LaDock memilih port kosong berikutnya:
+./deploy.sh /path/ke/aplikasi.zip 8080 3310
+
+# Dari Folder Source Code (port HTTP otomatis):
+./deploy.sh /path/ke/folder-project
+
+# Port HTTP manual:
+./deploy.sh /path/ke/folder-project 8080 3310
 
 # Dengan Opsi Lengkap:
-./deploy.sh --archive=/path/arsip.zip --dest=./docker/apps/myapp 8080 3308 --force-import
+./deploy.sh --archive=/path/arsip.zip --dest=./docker/apps/myapp 8080 3310 --force-import
 
 # Override batas memori default (512M) untuk setiap service saat deploy:
-./deploy.sh /path/ke/folder-project 8080 3308 --memory-limit=1G
+./deploy.sh /path/ke/folder-project 8080 3310 --memory-limit=1G
 ```
 
-Batas memori default dikonfigurasi melalui `resources.memory_limit` di `config.json` (default `512M`). Opsi `--memory-limit=SIZE` dapat digunakan untuk mengatur batas custom secara seragam pada setiap service aplikasi, gateway, dan database microservice. Dashboard Deploy Hub menyediakan kolom yang sama; jika dibiarkan kosong, nilai default konfigurasi digunakan.
+Batas memori default dikonfigurasi melalui `resources.memory_limit` di `config.json` (default `512M`). Opsi `--memory-limit=SIZE` mengatur batas custom seragam untuk service aplikasi dan gateway. Dashboard Deploy Hub menyediakan kolom yang sama; jika dibiarkan kosong, nilai default konfigurasi digunakan. Port HTTP yang tidak diberikan dipilih otomatis mulai dari `default_ports.monolith_http` atau `default_ports.gateway_http` (default `8080`); port yang sudah dipakai akan dilewati dengan kenaikan `+1`. Untuk microservices, gateway dan port akses langsung service dialokasikan berurutan dari port kosong berikutnya. Dashboard memiliki tombol **Cek Port** untuk melihat port yang tersedia/terpakai. Port eksplisit menjadi titik awal pencarian, bukan jaminan memakai port tersebut. Port DB sentral tetap `3310` di host (`3306` di jaringan Docker).
 
 ### 2. Menghentikan & Membersihkan Container
 
@@ -142,7 +147,7 @@ Batas memori default dikonfigurasi melalui `resources.memory_limit` di `config.j
 Data fisik MySQL sentral disimpan langsung di folder repo:
 - Folder host: **`docker/db/ladock_mysql/data/`**
 - Folder container: **`/var/lib/mysql`**
-- Port Host: **`3308`** (Internal: `3306`)
+- Port Host: **`3310`** (Internal: `3306`)
 - Container: **`ladock_mysql`**
 - Network: **`ladock_net`**
 
@@ -157,7 +162,7 @@ Pada penggunaan pertama setelah perubahan, `central_db.sh` memindahkan datadir d
 ./scripts/db_restore.sh <app_name>
 ```
 
-Source aplikasi monolith disalin ke `docker/apps/<app_name>/src/`, sedangkan microservice disalin ke `docker/apps/<project>/apps/<service>/`. Datadir database microservice disimpan terpisah di `docker/db/<project>/<service>/data/`. Perubahan source yang dibuat container tersimpan di folder lokal tersebut.
+Source aplikasi monolith disalin ke `docker/apps/<app_name>/src/`, sedangkan microservice disalin ke `docker/apps/<project>/apps/<service>/`. Semua service aplikasi memakai MySQL sentral `ladock_mysql` melalui jaringan `ladock_net`, pada port internal `3306` dan port host `3310`. Tiap service mendapat database/schema dan kredensial tersendiri. Database lokal microservice dari deployment lama tidak diimpor otomatis; container lamanya dihentikan, sementara datadir dan Docker volume lama tetap dipertahankan terpisah.
 
 Jika folder tujuan baru belum ada, deployment lama di `docker/<app_name>/` atau `docker/<project>/` dipindahkan ke `docker/apps/` saat deploy berikutnya. Datadir MySQL sentral lama di `docker/ladock_mysql/data/` disalin ke `docker/db/ladock_mysql/data/` saat `central_db.sh` dijalankan.
 
@@ -225,7 +230,7 @@ bash tests/test_deploy_structure.sh
 
 | Gejala | Penyebab Umum | Solusi |
 |---|---|---|
-| **Port conflict (3308 sudah terpakai)** | Ada service MySQL host lokal atau container lain di port 3308 | Ubah `LADOCK_DB_PORT` di `.ladock_db.env` dan `config.json` |
+| **Port conflict (3310 sudah terpakai)** | Ada service MySQL host lokal atau container lain di port 3310 | Ubah `LADOCK_DB_PORT` di `.ladock_db.env` dan samakan dengan `central_db.port` di `config.json` |
 | **Aplikasi tidak bisa konek database** | Container aplikasi belum terhubung ke network `ladock_net` | Pastikan `networks: ladock_net` terdefinisi di `docker-compose.yml` |
 | **Dump SQL tidak otomatis terimpor** | Database sudah berisi tabel dari deploy sebelumnya | Jalankan deploy dengan flag `--force-import` |
 | **Zip-Slip Warning saat extract** | Berkas arsip mengandung entri dengan `../` | Sistem secara otomatis mengabaikan entri berbahaya demi keamanan |

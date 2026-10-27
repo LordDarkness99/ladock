@@ -13,7 +13,7 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 CONTAINER_NAME="${LADOCK_DB_CONTAINER:-ladock_mysql}"
-DB_PORT="${LADOCK_DB_PORT:-3308}"
+DB_PORT="${LADOCK_DB_PORT:-3310}"
 ROOT_PASS="${LADOCK_DB_ROOT_PASS:-3baa6e5d124af02611fd0efb79ae292d}"
 NETWORK_NAME="${LADOCK_NET:-ladock_net}"
 VOLUME_NAME="${LADOCK_DB_VOLUME:-ladock_db_central_data}"

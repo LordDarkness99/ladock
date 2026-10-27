@@ -73,7 +73,8 @@ async function fetchStatus() {
       cdbBadge.innerText = 'STOPPED';
     }
     document.getElementById('cdb-name').innerText = cdb.container_name || 'ladock_mysql';
-    document.getElementById('cdb-port').innerText = cdb.port || '3308';
+    document.getElementById('cdb-port').innerText = cdb.port || '3310';
+    document.getElementById('deploy-db-port').value = cdb.port || '3310';
     document.getElementById('cdb-vol').innerText = cdb.volume_name || 'ladock_db_central_data';
     document.getElementById('cdb-net').innerText = cdb.network || 'ladock_net';
 
@@ -211,6 +212,34 @@ async function handleFileUpload(event) {
   }
 }
 
+async function checkDeployPort() {
+  const input = document.getElementById('deploy-http-port');
+  const status = document.getElementById('deploy-port-status');
+  const button = document.getElementById('btn-check-port');
+  const requestedPort = input.value.trim();
+  const query = requestedPort ? `?start=${encodeURIComponent(requestedPort)}` : '';
+  button.disabled = true;
+  status.innerText = 'Memeriksa port yang tersedia...';
+
+  try {
+    const res = await apiFetch(`/api/ports/available${query}`);
+    const data = await res.json();
+    if (!res.ok || !data.ports?.length) throw new Error(data.error || 'Port kosong tidak ditemukan.');
+
+    const selectedPort = data.ports[0];
+    input.value = selectedPort;
+    status.innerText = data.skipped?.length
+      ? `Port ${data.skipped.join(', ')} terpakai/dikecualikan; port kosong berikutnya: ${selectedPort}.`
+      : `Port ${selectedPort} tersedia.`;
+    showToast(`Port ${selectedPort} tersedia.`, 'success');
+  } catch (err) {
+    status.innerText = `Pengecekan port gagal: ${err.message}`;
+    showToast(err.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function handleDeploySubmit(event) {
   event.preventDefault();
   const archivePath = document.getElementById('deploy-archive-path').value.trim();
@@ -231,7 +260,7 @@ async function handleDeploySubmit(event) {
   const payload = {
     archive: archivePath || undefined,
     path: projectPath || undefined,
-    http_port: httpPort,
+    http_port: httpPort || 'auto',
     db_port: dbPort,
     php_version: phpVer || undefined,
     mode: mode || undefined,
@@ -591,4 +620,5 @@ document.getElementById('btn-manual-refresh')?.addEventListener('click', () => {
 
 fetchStatus();
 loadDeployedApps();
+checkDeployPort();
 setInterval(fetchStatus, 5000);

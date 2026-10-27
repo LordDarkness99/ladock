@@ -3,12 +3,12 @@
 - **Database Name**: `jatimfair2022_db`
 - **Host Container**: `ladock_mysql` (datadir lokal: `docker/db/ladock_mysql/data/`)
 - **Port Internal**: 3306
-- **Port Host**: 3308
-- **Last Backup**: Tue Oct 27 08:47:58 AM WIB 2026
+- **Port Host**: 3310
+- **Last Backup**: Tue Oct 27 10:45:28 AM WIB 2026
 - **Files**:
   - `schema.sql` : Struktur tabel, routines, dan triggers
   - `data.sql`   : Dump lengkap data dan struktur terakhir
-  - `backup_20261027_084758.sql` : Snapshot arsip saat backup dijalankan
+  - `backup_20261027_104528.sql` : Snapshot arsip saat backup dijalankan
 
 ### Cara Restore Manual:
 ```bash

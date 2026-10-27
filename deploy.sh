@@ -20,19 +20,28 @@ SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 CONFIG_FILE="$SCRIPT_DIR/config.json"
 CENTRAL_ENV_FILE="$SCRIPT_DIR/.ladock_db.env"
 
+if [[ -f "$CENTRAL_ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$CENTRAL_ENV_FILE"
+fi
+
 # ── Baca konfigurasi default dari config.json jika ada ────────────────────────
 DEFAULT_DEPLOY_ROOT="$SCRIPT_DIR/docker/apps"
 DEFAULT_MONOLITH_PORT=8080
+DEFAULT_GATEWAY_PORT=8080
 DEFAULT_BASE_APP_PORT=8081
-DEFAULT_DB_PORT=3308
+DEFAULT_DB_PORT=3310
 DEFAULT_MEMORY_LIMIT=512M
 
 if [[ -f "$CONFIG_FILE" ]] && command -v python3 >/dev/null 2>&1; then
   DEFAULT_DEPLOY_ROOT="$(python3 -c "import json, os; d=json.load(open('$CONFIG_FILE')); r=d.get('deploy_root', '$DEFAULT_DEPLOY_ROOT'); print(os.path.abspath(os.path.join('$SCRIPT_DIR', r)) if not os.path.isabs(r) else r)" 2>/dev/null || echo "$DEFAULT_DEPLOY_ROOT")"
   DEFAULT_MONOLITH_PORT="$(python3 -c "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('default_ports', {}).get('monolith_http', $DEFAULT_MONOLITH_PORT))" 2>/dev/null || echo "$DEFAULT_MONOLITH_PORT")"
+  DEFAULT_GATEWAY_PORT="$(python3 -c "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('default_ports', {}).get('gateway_http', $DEFAULT_GATEWAY_PORT))" 2>/dev/null || echo "$DEFAULT_GATEWAY_PORT")"
   DEFAULT_BASE_APP_PORT="$(python3 -c "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('default_ports', {}).get('base_app_port', $DEFAULT_BASE_APP_PORT))" 2>/dev/null || echo "$DEFAULT_BASE_APP_PORT")"
+  DEFAULT_DB_PORT="$(python3 -c "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('central_db', {}).get('port', $DEFAULT_DB_PORT))" 2>/dev/null || echo "$DEFAULT_DB_PORT")"
   DEFAULT_MEMORY_LIMIT="$(python3 -c "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('resources', {}).get('memory_limit', '$DEFAULT_MEMORY_LIMIT'))" 2>/dev/null || echo "$DEFAULT_MEMORY_LIMIT")"
 fi
+DEFAULT_DB_PORT="${LADOCK_DB_PORT:-$DEFAULT_DB_PORT}"
 
 # ── Parse flags & positional args ────────────────────────────────────────────
 ARGS=()
@@ -43,7 +52,8 @@ ARCHIVE_FILE=""
 ARCHIVE_DEST=""
 DEPLOY_MODE=""        # "" | "monolith" | "microservice"
 MAX_DEPTH=5
-BASE_APP_PORT="$DEFAULT_BASE_APP_PORT"
+BASE_APP_PORT=""
+BASE_APP_PORT_CUSTOM=0
 MEMORY_LIMIT="$DEFAULT_MEMORY_LIMIT"
 
 for arg in "$@"; do
@@ -58,7 +68,7 @@ for arg in "$@"; do
     --dest=*)          ARCHIVE_DEST="${arg#--dest=}" ;;
     --mode=*)          DEPLOY_MODE="${arg#--mode=}" ;;
     --max-depth=*)     MAX_DEPTH="${arg#--max-depth=}" ;;
-    --base-app-port=*) BASE_APP_PORT="${arg#--base-app-port=}" ;;
+    --base-app-port=*) BASE_APP_PORT="${arg#--base-app-port=}"; BASE_APP_PORT_CUSTOM=1 ;;
     --memory-limit=*)  MEMORY_LIMIT="${arg#--memory-limit=}" ;;
     *) ARGS+=("$arg") ;;
   esac
@@ -82,15 +92,16 @@ fi
 
 if [[ -n "$ARCHIVE_FILE" ]]; then
   PROJECT_PATH=""
-  HTTP_PORT="${ARGS[0]:-$DEFAULT_MONOLITH_PORT}"
+  HTTP_PORT="${ARGS[0]:-}"
   DB_PORT="${ARGS[1]:-$DEFAULT_DB_PORT}"
   PHP_VERSION_PARAM="${ARGS[2]:-}"
 else
   PROJECT_PATH="${ARGS[0]:-}"
-  HTTP_PORT="${ARGS[1]:-$DEFAULT_MONOLITH_PORT}"
+  HTTP_PORT="${ARGS[1]:-}"
   DB_PORT="${ARGS[2]:-$DEFAULT_DB_PORT}"
   PHP_VERSION_PARAM="${ARGS[3]:-}"
 fi
+[[ "$HTTP_PORT" == "auto" ]] && HTTP_PORT=""
 GATEWAY_PORT="$HTTP_PORT"
 
 # ── Utilitas ──────────────────────────────────────────────────────────────────
@@ -99,13 +110,13 @@ usage() {
 LaDock Universal Auto-Deploy v3.0
 
 Penggunaan (Monolith / Standalone App):
-  $0 /path/to/project [http_port] [db_port] [php_version] [flags]
-  $0 /path/to/archive.zip [http_port] [db_port] [php_version] [flags]
-  $0 --archive=/path/archive.zip [http_port] [db_port] [php_version] [flags]
-  $0 --cpmove=/path/cpmove-xxx.tar.gz [http_port] [db_port] [php_version] [flags]
+  $0 /path/to/project [http_port] [central_db_host_port] [php_version] [flags]
+  $0 /path/to/archive.zip [http_port] [central_db_host_port] [php_version] [flags]
+  $0 --archive=/path/archive.zip [http_port] [central_db_host_port] [php_version] [flags]
+  $0 --cpmove=/path/cpmove-xxx.tar.gz [http_port] [central_db_host_port] [php_version] [flags]
 
 Penggunaan (Microservices):
-  $0 /path/to/root-folder [gateway_port] [db_port] [flags]
+  $0 /path/to/root-folder [gateway_port] [central_db_host_port] [flags]
   $0 /path/to/root-folder --mode=microservice
 
 Flags:
@@ -117,7 +128,7 @@ Flags:
   --skip-import      Lewati proses import dump
   --mode=MODE        Paksa mode: 'monolith' atau 'microservice'
   --max-depth=N      Kedalaman scan microservice (default: 5)
-  --base-app-port=N  Port awal direct-access per service (default: 8081)
+  --base-app-port=N  Port awal direct-access service microservice
   --memory-limit=SIZE Batas memori untuk setiap service (default: $DEFAULT_MEMORY_LIMIT; contoh: 1G)
 EOF
 }
@@ -125,6 +136,36 @@ EOF
 log()  { echo -e "--> $*"; }
 info() { echo -e "    $*"; }
 hr()   { echo "============================================================"; }
+
+find_available_ports() {
+  local excluded_ports="$DEFAULT_DB_PORT"
+  [[ -n "${3:-}" ]] && excluded_ports+=",$3"
+  python3 "$SCRIPTS_DIR/find_free_ports.py" \
+    --start "$1" \
+    --count "$2" \
+    --exclude "$excluded_ports"
+}
+
+read_selected_ports() {
+  python3 -c 'import json, sys; print("\n".join(map(str, json.load(sys.stdin)["ports"])))'
+}
+
+report_skipped_ports() {
+  local skipped
+  skipped="$(python3 -c 'import json, sys; print(", ".join(map(str, json.load(sys.stdin)["skipped"])))')"
+  [[ -z "$skipped" ]] || info "Port terpakai/dikecualikan dan dilewati: $skipped"
+}
+
+stop_existing_container() {
+  local container_name="$1" state
+  if docker inspect "$container_name" >/dev/null 2>&1; then
+    state="$(docker inspect --format '{{.State.Status}}' "$container_name")"
+    if [[ "$state" == "running" || "$state" == "restarting" || "$state" == "paused" ]]; then
+      log "Menghentikan container lama '$container_name' sebelum memilih port..."
+      docker stop "$container_name" >/dev/null
+    fi
+  fi
+}
 
 # ── Cek Dependensi Sistem ─────────────────────────────────────────────────────
 if ! command -v python3 >/dev/null 2>&1; then
@@ -220,6 +261,15 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
 
   RAW_NAME="$(basename "$PROJECT_PATH")"
   PROJECT_NAME="$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g' | sed -E 's/^_+|_+$//g')"
+
+  stop_existing_container "${PROJECT_NAME}_app"
+  stop_existing_container "app_${PROJECT_NAME}"
+  PORT_START="${HTTP_PORT:-$DEFAULT_MONOLITH_PORT}"
+  PORT_RESULT="$(find_available_ports "$PORT_START" 1)"
+  report_skipped_ports <<<"$PORT_RESULT"
+  HTTP_PORT="$(printf '%s' "$PORT_RESULT" | read_selected_ports)"
+  GATEWAY_PORT="$HTTP_PORT"
+  info "Port HTTP dipilih: $HTTP_PORT (port terpakai dilewati otomatis)."
 
   # ── Pusatkan semua aplikasi ke folder docker/apps/<app_name>/ ──────────────
   TARGET_DEPLOY_DIR="$DEFAULT_DEPLOY_ROOT/$PROJECT_NAME"
@@ -346,7 +396,7 @@ EOF
     source "$CENTRAL_ENV_FILE"
   fi
   CENTRAL_DB_CONTAINER="${LADOCK_DB_CONTAINER:-ladock_mysql}"
-  CENTRAL_DB_PORT="${LADOCK_DB_PORT:-3308}"
+  CENTRAL_DB_PORT="${LADOCK_DB_PORT:-$DEFAULT_DB_PORT}"
   CENTRAL_DB_ROOT_PASS="${LADOCK_DB_ROOT_PASS:-3baa6e5d124af02611fd0efb79ae292d}"
   DB_PORT="$CENTRAL_DB_PORT"
 
@@ -578,9 +628,30 @@ declare -A SVC_DB_NAMES=()
 declare -A SVC_DB_USERS=()
 declare -A SVC_DB_PASSES=()
 
-CURRENT_APP_PORT=$BASE_APP_PORT
+stop_existing_container "${PROJECT_NAME}_gateway"
 for svc_name in "${SVC_NAMES[@]}"; do
-  SVC_HTTP_PORTS["$svc_name"]=$CURRENT_APP_PORT
+  stop_existing_container "${PROJECT_NAME}_${svc_name}_app"
+done
+
+PORT_START="${HTTP_PORT:-$DEFAULT_GATEWAY_PORT}"
+PORT_RESULT="$(find_available_ports "$PORT_START" 1)"
+report_skipped_ports <<<"$PORT_RESULT"
+GATEWAY_PORT="$(printf '%s' "$PORT_RESULT" | read_selected_ports)"
+if [[ $BASE_APP_PORT_CUSTOM -eq 1 ]]; then
+  APP_PORT_START="$BASE_APP_PORT"
+else
+  APP_PORT_START=$((GATEWAY_PORT + 1))
+  if [[ "$APP_PORT_START" -lt "$DEFAULT_BASE_APP_PORT" ]]; then
+    APP_PORT_START="$DEFAULT_BASE_APP_PORT"
+  fi
+fi
+BASE_PORT_RESULT="$(find_available_ports "$APP_PORT_START" "${#SVC_NAMES[@]}" "$GATEWAY_PORT")"
+report_skipped_ports <<<"$BASE_PORT_RESULT"
+mapfile -t APP_PORTS < <(printf '%s' "$BASE_PORT_RESULT" | read_selected_ports)
+
+CURRENT_APP_PORT=0
+for svc_name in "${SVC_NAMES[@]}"; do
+  SVC_HTTP_PORTS["$svc_name"]="${APP_PORTS[$CURRENT_APP_PORT]}"
   CURRENT_APP_PORT=$((CURRENT_APP_PORT + 1))
 
   svc_path="${SVC_PATHS[$svc_name]}"
@@ -602,7 +673,7 @@ echo " Project Root : $PROJECT_PATH"
 echo " Source Root  : $SOURCE_PROJECT_PATH"
 echo " Project Name : $PROJECT_NAME"
 echo " Gateway Port : $GATEWAY_PORT"
-echo " MySQL Port   : $DB_PORT"
+echo " MySQL Host Port : $DEFAULT_DB_PORT (internal 3306)"
 echo " Services     : ${#SVC_NAMES[@]}"
 for svc_name in "${SVC_NAMES[@]}"; do
   echo "   [$svc_name] PHP ${SVC_PHP_VERSIONS[$svc_name]} | direct :${SVC_HTTP_PORTS[$svc_name]} | route /${svc_name}/"
@@ -614,15 +685,6 @@ DOCKER_DIR="$PROJECT_PATH/.docker"
 CREDS_DIR="$DOCKER_DIR/credentials"
 GATEWAY_DIR="$DOCKER_DIR/gateway"
 mkdir -p "$DOCKER_DIR" "$CREDS_DIR" "$GATEWAY_DIR"
-
-ROOT_PASS_FILE="$CREDS_DIR/.db_root_pass"
-if [[ -f "$ROOT_PASS_FILE" ]]; then
-  DB_ROOT_PASS="$(cat "$ROOT_PASS_FILE")"
-else
-  DB_ROOT_PASS="$(openssl rand -hex 16)"
-  echo "$DB_ROOT_PASS" > "$ROOT_PASS_FILE"
-  chmod 600 "$ROOT_PASS_FILE"
-fi
 
 FRESH_DEPLOYS=()
 for svc_name in "${SVC_NAMES[@]}"; do
@@ -646,10 +708,52 @@ for svc_name in "${SVC_NAMES[@]}"; do
 DB_NAME=$DB_NAME
 DB_USER=$DB_USER
 DB_PASS=$DB_PASS
-DB_ROOT_PASS=$DB_ROOT_PASS
 EOF
     chmod 600 "$CREDS_FILE"
   fi
+done
+
+COMPOSE_DB_FILE="$PROJECT_PATH/.docker-compose-db.yml"
+COMPOSE_APP_FILE="$PROJECT_PATH/.docker-compose-app.yml"
+
+if [[ -f "$COMPOSE_DB_FILE" ]]; then
+  log "Menghentikan DB microservice lama; data lama akan tetap terpisah dan dipertahankan..."
+  $DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" down --remove-orphans >/dev/null 2>&1 || true
+fi
+
+for svc_name in "${SVC_NAMES[@]}"; do
+  legacy_db_container="${PROJECT_NAME}_${svc_name}_db"
+  if docker inspect "$legacy_db_container" >/dev/null 2>&1; then
+    log "Menghentikan container DB lama '$legacy_db_container' tanpa menghapus datadir/volume..."
+    docker rm -f "$legacy_db_container" >/dev/null
+  fi
+done
+
+"$SCRIPT_DIR/central_db.sh" start
+CENTRAL_DB_CONTAINER="${LADOCK_DB_CONTAINER:-ladock_mysql}"
+CENTRAL_DB_PORT="${LADOCK_DB_PORT:-$DEFAULT_DB_PORT}"
+CENTRAL_DB_ROOT_PASS="${LADOCK_DB_ROOT_PASS:-3baa6e5d124af02611fd0efb79ae292d}"
+CENTRAL_DB_NETWORK="${LADOCK_NET:-ladock_net}"
+DB_PORT="$CENTRAL_DB_PORT"
+
+for svc_name in "${SVC_NAMES[@]}"; do
+  db_name="${SVC_DB_NAMES[$svc_name]}"
+  db_user="${SVC_DB_USERS[$svc_name]}"
+  db_pass="${SVC_DB_PASSES[$svc_name]}"
+
+  if [[ ! "$db_name" =~ ^[A-Za-z0-9_]+$ || ! "$db_user" =~ ^[A-Za-z0-9_]+$ || ! "$db_pass" =~ ^[A-Za-z0-9]+$ ]]; then
+    echo "❌ Kredensial DB service '$svc_name' tidak valid; nama hanya boleh berisi huruf, angka, dan underscore." >&2
+    exit 1
+  fi
+
+  log "Menyiapkan database sentral '$db_name' untuk service '$svc_name'..."
+  docker exec -i "$CENTRAL_DB_CONTAINER" mysql -uroot -p"$CENTRAL_DB_ROOT_PASS" -e "
+    CREATE DATABASE IF NOT EXISTS \`${db_name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    CREATE USER IF NOT EXISTS '${db_user}'@'%' IDENTIFIED BY '${db_pass}';
+    ALTER USER '${db_user}'@'%' IDENTIFIED BY '${db_pass}';
+    GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${db_user}'@'%';
+    FLUSH PRIVILEGES;
+  " >/dev/null
 done
 
 SERVICES_ARG=""
@@ -674,20 +778,16 @@ for svc_name in "${SVC_NAMES[@]}"; do
   SVC_PATHS_ARG+="${svc_name}:${SVC_PATHS[$svc_name]}"
 done
 
-COMPOSE_DB_FILE="$PROJECT_PATH/.docker-compose-db.yml"
-COMPOSE_APP_FILE="$PROJECT_PATH/.docker-compose-app.yml"
-
-log "Men-generate docker-compose-db.yml dan docker-compose-app.yml..."
+log "Men-generate docker-compose-app.yml yang terhubung ke MySQL sentral..."
 python3 "$SCRIPTS_DIR/generate_compose.py" \
   --project           "$PROJECT_NAME" \
   --services          "$SERVICES_ARG" \
   --service-paths     "${SVC_PATHS_ARG:-}" \
   --docker-dir        "$DOCKER_DIR" \
   --gateway-port      "$GATEWAY_PORT" \
-  --db-port           "$DB_PORT" \
-  --db-data-root      "$SCRIPT_DIR/docker/db" \
   --memory-limit      "$MEMORY_LIMIT" \
-  --db-root-pass      "$DB_ROOT_PASS" \
+  --central-db-host   "$CENTRAL_DB_CONTAINER" \
+  --central-db-network "$CENTRAL_DB_NETWORK" \
   --php-versions      "$PHP_VERS_ARG" \
   --composer-versions "$COMP_VERS_ARG" \
   --db-creds          "$DB_CREDS_ARG" \
@@ -733,7 +833,7 @@ for svc_name in "${SVC_NAMES[@]}"; do
   }
 
   set_clean_env "DB_CONNECTION" "mysql"
-  set_clean_env "DB_HOST"       "db_${svc_name}"
+  set_clean_env "DB_HOST"       "$CENTRAL_DB_CONTAINER"
   set_clean_env "DB_PORT"       "3306"
   set_clean_env "DB_DATABASE"   "$db_name"
   set_clean_env "DB_USERNAME"   "$db_user"
@@ -746,58 +846,9 @@ cd "$PROJECT_PATH"
 $DC -f "$COMPOSE_APP_FILE" -p "${PROJECT_NAME}_app_stack" down --remove-orphans >/dev/null 2>&1 || true
 $DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" down --remove-orphans >/dev/null 2>&1 || true
 
-for svc_name in "${SVC_NAMES[@]}"; do
-  DB_PROJECT_DIR="$SCRIPT_DIR/docker/db/$PROJECT_NAME"
-  DB_SERVICE_DIR="$DB_PROJECT_DIR/$svc_name"
-  DB_DATA_DIR="$DB_SERVICE_DIR/data"
-  DB_MIGRATION_MARKER="$DB_SERVICE_DIR/.local-storage-migrated"
-  LEGACY_DB_SERVICE_DIR="$PROJECT_PATH/db/$svc_name"
-  if [[ ! -d "$LEGACY_DB_SERVICE_DIR" && -d "$LEGACY_PROJECT_PATH/db/$svc_name" ]]; then
-    LEGACY_DB_SERVICE_DIR="$LEGACY_PROJECT_PATH/db/$svc_name"
-  fi
-  if [[ -d "$LEGACY_DB_SERVICE_DIR" ]]; then
-    if [[ ! -e "$DB_SERVICE_DIR" ]]; then
-      log "Memindahkan data DB service '$svc_name' ke $DB_SERVICE_DIR ..."
-      mkdir -p "$DB_PROJECT_DIR"
-      mv "$LEGACY_DB_SERVICE_DIR" "$DB_SERVICE_DIR"
-    elif [[ -n "$(find "$LEGACY_DB_SERVICE_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
-      echo "❌ Data DB lama dan baru sama-sama ada untuk '$svc_name'; migrasi dihentikan agar data tidak tertimpa." >&2
-      exit 1
-    fi
-  fi
-  OLD_DB_VOLUME="${PROJECT_NAME}_db_stack_${PROJECT_NAME}_${svc_name}_dbdata"
-  mkdir -p "$DB_DATA_DIR"
-
-  if docker volume inspect "$OLD_DB_VOLUME" >/dev/null 2>&1; then
-    if [[ -f "$DB_MIGRATION_MARKER" ]]; then
-      info "Datadir lokal '$svc_name' sudah dimigrasikan; named volume lama dipertahankan sebagai cadangan."
-    elif [[ -z "$(find "$DB_DATA_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
-      log "Memindahkan data DB service '$svc_name' ke $DB_DATA_DIR ..."
-      docker run --rm \
-        -v "${OLD_DB_VOLUME}:/source:ro" \
-        -v "$DB_DATA_DIR:/destination" \
-        --user 0:0 \
-        --entrypoint sh \
-        mysql:8.0 \
-        -ec 'cp -a /source/. /destination/'
-      touch "$DB_MIGRATION_MARKER"
-    else
-      echo "❌ Migrasi DB '$svc_name' dibatalkan: folder lokal berisi data tetapi belum memiliki penanda migrasi: $DB_DATA_DIR" >&2
-      exit 1
-    fi
-  fi
-done
-
-$DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" up -d
-
-for svc_name in "${SVC_NAMES[@]}"; do
-  timeout=60; elapsed=0
-  until $DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" exec -T "db_${svc_name}" \
-        mysql -uroot -p"$DB_ROOT_PASS" -e "SELECT 1" >/dev/null 2>&1; do
-    [[ $elapsed -ge $timeout ]] && echo "MySQL db_${svc_name} timeout." && break
-    sleep 2; elapsed=$((elapsed+2))
-  done
-done
+if [[ -f "$COMPOSE_DB_FILE" ]]; then
+  rm -- "$COMPOSE_DB_FILE"
+fi
 
 $DC -f "$COMPOSE_APP_FILE" -p "${PROJECT_NAME}_app_stack" up -d --build
 
