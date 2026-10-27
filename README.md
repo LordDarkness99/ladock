@@ -130,6 +130,8 @@ chmod +x deploy.sh destroy.sh central_db.sh monitor.sh
 
 Batas memori default dikonfigurasi melalui `resources.memory_limit` di `config.json` (default `512M`). Opsi `--memory-limit=SIZE` mengatur batas custom seragam untuk service aplikasi dan gateway. Dashboard Deploy Hub menyediakan kolom yang sama; jika dibiarkan kosong, nilai default konfigurasi digunakan. Port HTTP yang tidak diberikan dipilih otomatis mulai dari `default_ports.monolith_http` atau `default_ports.gateway_http` (default `8080`); port yang sudah dipakai akan dilewati dengan kenaikan `+1`. Untuk microservices, gateway dan port akses langsung service dialokasikan berurutan dari port kosong berikutnya. Dashboard memiliki tombol **Cek Port** untuk melihat port yang tersedia/terpakai. Port eksplisit menjadi titik awal pencarian, bukan jaminan memakai port tersebut. Port DB sentral tetap `3310` di host (`3306` di jaringan Docker).
 
+Saat deploy, kredensial database dibaca hanya dari file `.env` service (`DB_DATABASE`, `DB_USERNAME`/`DB_USER`, dan `DB_PASSWORD`); `.env.example` tidak dibaca ataupun disalin sebagai fallback. Jika `.env` atau variabelnya tidak tersedia, LaDock memakai kredensial tersimpan atau membuat hanya nilai yang belum ada. Nilai aplikasi lain seperti `APP_KEY` tidak dibuat ulang atau ditimpa; file `.env` service dimuat langsung oleh Compose.
+
 ### 2. Menghentikan & Membersihkan Container
 
 ```bash

@@ -12,7 +12,6 @@ def test_memory_limit_is_applied_to_every_microservice_container():
         project="sample",
         services=services,
         gateway_port=8080,
-        db_creds={},
         php_versions={},
         composer_versions={},
         memory_limit="1G",
@@ -30,7 +29,6 @@ def test_default_memory_limit_is_applied_to_gateway_and_app_services():
         project="sample",
         services=services,
         gateway_port=8080,
-        db_creds={},
         php_versions={},
         composer_versions={},
     )
@@ -38,20 +36,18 @@ def test_default_memory_limit_is_applied_to_gateway_and_app_services():
     assert app_compose.count("mem_limit: 512M") == len(services) + 1
 
 
-def test_microservices_connect_to_central_database_on_shared_network():
+def test_microservices_load_environment_from_each_service_and_use_shared_network():
     app_compose = build_app_compose(
         project="sample",
         services=[{"name": "web", "http_port": 8081}],
         gateway_port=8080,
-        db_creds={"web": {"db_name": "sample_web_db", "db_user": "sample_web", "db_pass": "secret"}},
         php_versions={},
         composer_versions={},
-        central_db_host="central_mysql",
         central_db_network="shared_net",
     )
 
-    assert 'DB_HOST: "central_mysql"' in app_compose
-    assert 'DB_PORT: "3306"' in app_compose
+    assert '      - "./.env"' in app_compose
+    assert "DB_PASSWORD:" not in app_compose
     assert app_compose.count("      - shared_net") == 2
     assert "db_web:" not in app_compose
     assert 'name: shared_net' in app_compose
@@ -64,7 +60,6 @@ def test_invalid_memory_limit_is_rejected():
             project="sample",
             services=[{"name": "web", "http_port": 8081}],
             gateway_port=8080,
-            db_creds={},
             php_versions={},
             composer_versions={},
             memory_limit="512M; other: value",

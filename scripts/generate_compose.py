@@ -11,13 +11,12 @@ Usage:
         --gateway-port <port>  \
         --php-versions '<name1>:<phpver1>,<name2>:<phpver2>,...' \
         --composer-versions '<name1>:<compver1>,...' \
-        --db-creds '<name1>:<dbname>:<dbuser>:<dbpass>|...' \
-        --central-db-host <container_name> \
         --central-db-network <network_name> \
         --output-dir /abs/path/to/project
 """
 
 import argparse
+import json
 import os
 import re
 
@@ -49,13 +48,11 @@ def build_app_compose(
     project: str,
     services: list[dict],
     gateway_port: int,
-    db_creds: dict,
     php_versions: dict[str, str],
     composer_versions: dict[str, str],
     service_paths: dict[str, str] | None = None,
     docker_dir: str = ".docker",
     memory_limit: str = "512M",
-    central_db_host: str = "ladock_mysql",
     central_db_network: str = "ladock_net",
 ) -> str:
     memory_limit = _validate_memory_limit(memory_limit)
@@ -90,11 +87,6 @@ def build_app_compose(
         http_port = svc["http_port"]
         php_ver = php_versions.get(sname, "8.4")
         comp_ver = composer_versions.get(sname, "2")
-        creds = db_creds.get(sname, {})
-        db_name = creds.get("db_name", f"{sname}_db")
-        db_user = creds.get("db_user", f"{sname}_user")
-        db_pass = creds.get("db_pass", "secret")
-
         svc_context = (service_paths or {}).get(sname, ".")
         dockerfile = f"{docker_dir}/Dockerfile"
         vhost_mount = f"{docker_dir}/apache-vhost.conf"
@@ -112,6 +104,8 @@ def build_app_compose(
             f"    restart: unless-stopped",
             f"    mem_limit: {memory_limit}",
             f"    working_dir: /var/www",
+            f"    env_file:",
+            f"      - {json.dumps(os.path.join(svc_context, '.env'))}",
             f"    ports:",
             f'      - "{http_port}:80"',
             f"    volumes:",
@@ -119,12 +113,6 @@ def build_app_compose(
             f"      - {vhost_mount}:/etc/apache2/sites-available/000-default.conf:ro",
             f"    environment:",
             f'      APP_ENV: "local"',
-            f'      DB_CONNECTION: "mysql"',
-            f'      DB_HOST: "{central_db_host}"',
-            f'      DB_PORT: "3306"',
-            f'      DB_DATABASE: "{db_name}"',
-            f'      DB_USERNAME: "{db_user}"',
-            f'      DB_PASSWORD: "{db_pass}"',
             f"    networks:",
             f"      - {central_db_network}",
         ]
@@ -149,12 +137,9 @@ def main():
     ap.add_argument("--gateway-port",      required=True, type=int)
     ap.add_argument("--memory-limit",      type=_validate_memory_limit, default="512M",
                     help="Batas memori untuk setiap service (contoh: 512M, 1G)")
-    ap.add_argument("--central-db-host",   default="ladock_mysql")
     ap.add_argument("--central-db-network", default="ladock_net")
     ap.add_argument("--php-versions",      default="",   help="'name1:phpver,name2:phpver,...'")
     ap.add_argument("--composer-versions", default="",   help="'name1:compver,...'")
-    ap.add_argument("--db-creds",          default="",
-                    help="'svcname:dbname:dbuser:dbpass|...' (pipe-separated per service)")
     ap.add_argument("--output-dir",        required=True, help="Folder tempat menulis docker-compose-app.yml")
     args = ap.parse_args()
 
@@ -166,31 +151,17 @@ def main():
     php_versions      = _pairs(args.php_versions)
     composer_versions = _pairs(args.composer_versions)
 
-    db_creds: dict[str, dict] = {}
-    if args.db_creds.strip():
-        for entry in args.db_creds.split("|"):
-            parts = entry.strip().split(":")
-            if len(parts) >= 4:
-                svc_name = parts[0]
-                db_creds[svc_name] = {
-                    "db_name": parts[1],
-                    "db_user": parts[2],
-                    "db_pass": parts[3],
-                }
-
     service_paths = _pairs(args.service_paths)
 
     app_yaml = build_app_compose(
         project=args.project,
         services=services,
         gateway_port=args.gateway_port,
-        db_creds=db_creds,
         php_versions=php_versions,
         composer_versions=composer_versions,
         service_paths=service_paths,
         docker_dir=args.docker_dir,
         memory_limit=args.memory_limit,
-        central_db_host=args.central_db_host,
         central_db_network=args.central_db_network,
     )
 

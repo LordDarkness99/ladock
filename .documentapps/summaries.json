@@ -12,7 +12,7 @@
     "summary": "Skrip pengelola MySQL sentral yang menyiapkan network/container, memigrasikan data ke bind mount lokal, membersihkan symlink socket stale sebelum/sesudah startup dan saat stop, menangani container restarting, serta menunggu kesiapan database."
   },
   "deploy.sh": {
-    "summary": "Entry point deployment LaDock yang otomatis memilih port HTTP kosong mulai dari nilai default/port awal, menghindari port terpakai, mengarahkan aplikasi ke MySQL sentral, dan menjaga data DB microservice legacy."
+    "summary": "Entry point deployment LaDock yang memilih port HTTP kosong otomatis, membaca ulang kredensial DB hanya dari .env, mempertahankan key aplikasi tanpa membuat ulang nilai yang tersedia, dan mengarahkan service ke MySQL sentral."
   },
   "destroy.sh": {
     "summary": "Skrip untuk menemukan project berdasarkan nama atau path dan menghentikan container Compose aplikasi/database pada layout baru maupun legacy, dengan opsi menghapus image."
@@ -69,7 +69,10 @@
     "summary": "Memindai sub-project Laravel untuk deployment microservices dan menghasilkan pemetaan service beserta informasi port/aplikasi yang diperlukan generator Compose."
   },
   "scripts/generate_compose.py": {
-    "summary": "Membangun Compose microservices yang menghubungkan gateway dan semua aplikasi ke network MySQL sentral, memakai host DB sentral serta schema/kredensial terpisah, dan batas memori per service."
+    "summary": "Membangun Compose microservices yang memuat environment dari .env masing-masing service, menggunakan network DB sentral, dan menerapkan batas memori per service."
+  },
+  "scripts/env_config.py": {
+    "summary": "Membaca dan memperbarui variabel dotenv tanpa mengeksekusi isinya, mempertahankan nilai aplikasi yang tidak terkait dan mendukung kredensial dengan karakter khusus."
   },
   "scripts/find_free_ports.py": {
     "summary": "Memeriksa port TCP yang terpakai oleh proses host dan binding Docker, lalu mencari port kosong mulai dari port awal dengan kenaikan satu dan mendukung port yang dikecualikan."
@@ -126,7 +129,10 @@
     "summary": "Konfigurasi klien dan server MySQL sentral agar memakai socket runtime /var/run/mysqld/mysqld.sock di luar datadir bind mount."
   },
   "tests/test_generate_compose.py": {
-    "summary": "Tes generator Compose yang memastikan gateway dan service microservice memakai host/network MySQL sentral dengan port internal yang sama."
+    "summary": "Tes generator Compose microservices untuk batas memori dan pemuatan environment per service tanpa menaruh rahasia DB langsung di file Compose."
+  },
+  "tests/test_env_config.py": {
+    "summary": "Tes pembacaan nilai dotenv tanpa eksekusi, preservasi APP_KEY, dan round-trip password dengan karakter khusus."
   },
   "tests/test_find_free_ports.py": {
     "summary": "Tes pemilihan port kosong, port pengecualian, kondisi kehabisan port, dan parsing binding port Docker IPv4/IPv6."

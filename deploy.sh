@@ -150,6 +150,14 @@ read_selected_ports() {
   python3 -c 'import json, sys; print("\n".join(map(str, json.load(sys.stdin)["ports"])))'
 }
 
+read_env_value() {
+  python3 "$SCRIPTS_DIR/env_config.py" get --file "$1" "$2"
+}
+
+set_clean_env() {
+  python3 "$SCRIPTS_DIR/env_config.py" set --file "$1" --key "$2" --value "$3"
+}
+
 report_skipped_ports() {
   local skipped
   skipped="$(python3 -c 'import json, sys; print(", ".join(map(str, json.load(sys.stdin)["skipped"])))')"
@@ -316,6 +324,12 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
     done
   fi
 
+  cd "$SRC_DIR"
+  if [[ ! -f .env ]]; then
+    touch .env
+  fi
+  APP_ENV_FILE="$SRC_DIR/.env"
+
   # Hapus file legacy / hidden Docker lama jika ada
   rm -rf "$PROJECT_PATH/.docker" "$PROJECT_PATH/.docker-compose-app.yml" "$PROJECT_PATH/.docker-compose-db.yml" "$PROJECT_PATH/.docker-compose.yml"
 
@@ -368,24 +382,34 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
   CREDS_FILE="$PROJECT_PATH/.credentials.env"
   FRESH_DEPLOY=0
   if [[ -f "$CREDS_FILE" ]]; then
-    log "Menggunakan kredensial database yang tersimpan..."
-    # shellcheck disable=SC1090
-    source "$CREDS_FILE"
+    log "Menggunakan kredensial DB yang terdeteksi di .env; kredensial tersimpan menjadi fallback..."
   else
-    log "Men-generate kredensial database baru..."
     FRESH_DEPLOY=1
-    DB_NAME="${PROJECT_NAME}_db"
-    SHORT_NAME="$(echo "$PROJECT_NAME" | cut -c1-20)"
-    DB_USER="${SHORT_NAME}_user"
-    DB_PASS="$(openssl rand -hex 12)"
-    DB_ROOT_PASS="$(openssl rand -hex 12)"
-    cat > "$CREDS_FILE" <<EOF
-DB_NAME=$DB_NAME
-DB_USER=$DB_USER
-DB_PASS=$DB_PASS
-DB_ROOT_PASS=$DB_ROOT_PASS
-EOF
-    chmod 600 "$CREDS_FILE"
+    log "Membaca kredensial DB yang sudah ada atau membuat hanya nilai yang belum tersedia..."
+  fi
+  STORED_DB_NAME="$(read_env_value "$CREDS_FILE" DB_NAME)"
+  STORED_DB_USER="$(read_env_value "$CREDS_FILE" DB_USER)"
+  STORED_DB_PASS="$(read_env_value "$CREDS_FILE" DB_PASS)"
+  DB_ROOT_PASS="$(read_env_value "$CREDS_FILE" DB_ROOT_PASS)"
+  ENV_DB_NAME="$(read_env_value "$APP_ENV_FILE" DB_DATABASE)"
+  ENV_DB_USER="$(read_env_value "$APP_ENV_FILE" DB_USERNAME)"
+  [[ -n "$ENV_DB_USER" ]] || ENV_DB_USER="$(read_env_value "$APP_ENV_FILE" DB_USER)"
+  ENV_DB_PASS="$(read_env_value "$APP_ENV_FILE" DB_PASSWORD)"
+
+  DB_NAME="${ENV_DB_NAME:-${STORED_DB_NAME:-${PROJECT_NAME}_db}}"
+  SHORT_NAME="$(echo "$PROJECT_NAME" | cut -c1-20)"
+  DB_USER="${ENV_DB_USER:-${STORED_DB_USER:-${SHORT_NAME}_user}}"
+  DB_PASS="${ENV_DB_PASS:-${STORED_DB_PASS:-$(openssl rand -hex 12)}}"
+  DB_ROOT_PASS="${DB_ROOT_PASS:-$(openssl rand -hex 12)}"
+  : >> "$CREDS_FILE"
+  set_clean_env "$CREDS_FILE" DB_NAME "$DB_NAME"
+  set_clean_env "$CREDS_FILE" DB_USER "$DB_USER"
+  set_clean_env "$CREDS_FILE" DB_PASS "$DB_PASS"
+  set_clean_env "$CREDS_FILE" DB_ROOT_PASS "$DB_ROOT_PASS"
+  chmod 600 "$CREDS_FILE"
+  if [[ ! "$DB_NAME" =~ ^[A-Za-z0-9_]+$ || -z "$DB_USER" || "$DB_USER" == *$'\n'* || "$DB_PASS" == *$'\n'* ]]; then
+    echo "❌ DB_DATABASE harus memakai huruf, angka, atau underscore; user/password tidak boleh kosong atau berisi baris baru." >&2
+    exit 1
   fi
 
   # ── Memastikan Database Sentral Aktif ──────────────────────────────────────
@@ -417,39 +441,23 @@ EOF
   sed -e "s/__PROJECT__/$PROJECT_NAME/g" \
       -e "s/__HTTP_PORT__/$HTTP_PORT/g" \
       -e "s/__MEMORY_LIMIT__/$MEMORY_LIMIT/g" \
-      -e "s/__DB_NAME__/$DB_NAME/g" \
-      -e "s/__DB_USER__/$DB_USER/g" \
-      -e "s/__DB_PASS__/$DB_PASS/g" \
       -e "s/__PHP_VERSION__/$PHP_VERSION/g" \
       -e "s/__COMPOSER_VERSION__/$COMPOSER_VERSION/g" \
       "$TEMPLATE_DIR/docker-compose-app.yml.tpl" > "$PROJECT_PATH/docker-compose.yml"
 
   # ── Konfigurasi .env (tanpa meninggalkan file .env.bak) ────────────────────
   cd "$SRC_DIR"
-  if [[ ! -f .env ]]; then
-    [[ -f .env.example ]] && cp .env.example .env || touch .env
-  fi
-
-  set_clean_env() {
-    local key="$1" val="$2" file="$3"
-    if grep -q "^${key}=" "$file" 2>/dev/null; then
-      sed -i "s|^${key}=.*|${key}=${val}|" "$file"
-    else
-      echo "${key}=${val}" >> "$file"
-    fi
-  }
-
-  set_clean_env "DB_CONNECTION" "mysql" "$SRC_DIR/.env"
-  set_clean_env "DB_HOST"       "$CENTRAL_DB_CONTAINER" "$SRC_DIR/.env"
-  set_clean_env "DB_PORT"       "3306" "$SRC_DIR/.env"
-  set_clean_env "DB_DATABASE"   "$DB_NAME" "$SRC_DIR/.env"
-  set_clean_env "DB_USERNAME"   "$DB_USER" "$SRC_DIR/.env"
-  set_clean_env "DB_PASSWORD"   "$DB_PASS" "$SRC_DIR/.env"
-  set_clean_env "APP_URL"       "http://localhost:${HTTP_PORT}" "$SRC_DIR/.env"
-  set_clean_env "ASSET_URL"     "http://localhost:${HTTP_PORT}" "$SRC_DIR/.env"
+  set_clean_env "$SRC_DIR/.env" DB_CONNECTION mysql
+  set_clean_env "$SRC_DIR/.env" DB_HOST "$CENTRAL_DB_CONTAINER"
+  set_clean_env "$SRC_DIR/.env" DB_PORT 3306
+  set_clean_env "$SRC_DIR/.env" DB_DATABASE "$DB_NAME"
+  set_clean_env "$SRC_DIR/.env" DB_USERNAME "$DB_USER"
+  set_clean_env "$SRC_DIR/.env" DB_PASSWORD "$DB_PASS"
+  set_clean_env "$SRC_DIR/.env" APP_URL "http://localhost:${HTTP_PORT}"
+  set_clean_env "$SRC_DIR/.env" ASSET_URL "http://localhost:${HTTP_PORT}"
 
   for key in ADMIN_HTTPS FORCE_HTTPS LARAVEL_ADMIN_HTTPS SESSION_SECURE_COOKIE; do
-    grep -q "^${key}=" "$SRC_DIR/.env" && set_clean_env "$key" "false" "$SRC_DIR/.env"
+    [[ -n "$(read_env_value "$SRC_DIR/.env" "$key")" ]] && set_clean_env "$SRC_DIR/.env" "$key" false
   done
 
   # ── Normalisasi Asset & URL Template ──────────────────────────────────────
@@ -484,10 +492,14 @@ EOF
 
   # ── Buat Database & User di DB Sentral ────────────────────────────────────
   log "Memastikan Database '$DB_NAME' & User '$DB_USER' di DB Sentral..."
+  SQL_DB_USER="${DB_USER//\\/\\\\}"
+  SQL_DB_USER="${SQL_DB_USER//\'/\'\'}"
+  SQL_DB_PASS="${DB_PASS//\\/\\\\}"
+  SQL_DB_PASS="${SQL_DB_PASS//\'/\'\'}"
   docker exec -i "$CENTRAL_DB_CONTAINER" mysql -uroot -p"$CENTRAL_DB_ROOT_PASS" -e "
     CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-    CREATE USER IF NOT EXISTS '${DB_USER}'@'%' IDENTIFIED BY '${DB_PASS}';
-    ALTER USER '${DB_USER}'@'%' IDENTIFIED BY '${DB_PASS}';
+    CREATE USER IF NOT EXISTS '${SQL_DB_USER}'@'%' IDENTIFIED BY '${SQL_DB_PASS}';
+    ALTER USER '${SQL_DB_USER}'@'%' IDENTIFIED BY '${SQL_DB_PASS}';
     GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'%';
     FLUSH PRIVILEGES;
   " >/dev/null 2>&1
@@ -686,31 +698,34 @@ CREDS_DIR="$DOCKER_DIR/credentials"
 GATEWAY_DIR="$DOCKER_DIR/gateway"
 mkdir -p "$DOCKER_DIR" "$CREDS_DIR" "$GATEWAY_DIR"
 
-FRESH_DEPLOYS=()
 for svc_name in "${SVC_NAMES[@]}"; do
-  CREDS_FILE="$CREDS_DIR/${svc_name}.env"
-  if [[ -f "$CREDS_FILE" ]]; then
-    # shellcheck disable=SC1090
-    source "$CREDS_FILE"
-    SVC_DB_NAMES["$svc_name"]="$DB_NAME"
-    SVC_DB_USERS["$svc_name"]="$DB_USER"
-    SVC_DB_PASSES["$svc_name"]="$DB_PASS"
-  else
-    FRESH_DEPLOYS+=("$svc_name")
-    SHORT_SVC="$(echo "${PROJECT_NAME}_${svc_name}" | cut -c1-20)"
-    DB_NAME="${PROJECT_NAME}_${svc_name}_db"
-    DB_USER="${SHORT_SVC}_u"
-    DB_PASS="$(openssl rand -hex 12)"
-    SVC_DB_NAMES["$svc_name"]="$DB_NAME"
-    SVC_DB_USERS["$svc_name"]="$DB_USER"
-    SVC_DB_PASSES["$svc_name"]="$DB_PASS"
-    cat > "$CREDS_FILE" <<EOF
-DB_NAME=$DB_NAME
-DB_USER=$DB_USER
-DB_PASS=$DB_PASS
-EOF
-    chmod 600 "$CREDS_FILE"
+  svc_path="${SVC_PATHS[$svc_name]}"
+  cd "$svc_path"
+  if [[ ! -f .env ]]; then
+    touch .env
   fi
+
+  CREDS_FILE="$CREDS_DIR/${svc_name}.env"
+  STORED_DB_NAME="$(read_env_value "$CREDS_FILE" DB_NAME)"
+  STORED_DB_USER="$(read_env_value "$CREDS_FILE" DB_USER)"
+  STORED_DB_PASS="$(read_env_value "$CREDS_FILE" DB_PASS)"
+  ENV_DB_NAME="$(read_env_value "$svc_path/.env" DB_DATABASE)"
+  ENV_DB_USER="$(read_env_value "$svc_path/.env" DB_USERNAME)"
+  [[ -n "$ENV_DB_USER" ]] || ENV_DB_USER="$(read_env_value "$svc_path/.env" DB_USER)"
+  ENV_DB_PASS="$(read_env_value "$svc_path/.env" DB_PASSWORD)"
+
+  SHORT_SVC="$(echo "${PROJECT_NAME}_${svc_name}" | cut -c1-20)"
+  DB_NAME="${ENV_DB_NAME:-${STORED_DB_NAME:-${PROJECT_NAME}_${svc_name}_db}}"
+  DB_USER="${ENV_DB_USER:-${STORED_DB_USER:-${SHORT_SVC}_u}}"
+  DB_PASS="${ENV_DB_PASS:-${STORED_DB_PASS:-$(openssl rand -hex 12)}}"
+  SVC_DB_NAMES["$svc_name"]="$DB_NAME"
+  SVC_DB_USERS["$svc_name"]="$DB_USER"
+  SVC_DB_PASSES["$svc_name"]="$DB_PASS"
+  : >> "$CREDS_FILE"
+  set_clean_env "$CREDS_FILE" DB_NAME "$DB_NAME"
+  set_clean_env "$CREDS_FILE" DB_USER "$DB_USER"
+  set_clean_env "$CREDS_FILE" DB_PASS "$DB_PASS"
+  chmod 600 "$CREDS_FILE"
 done
 
 COMPOSE_DB_FILE="$PROJECT_PATH/.docker-compose-db.yml"
@@ -741,16 +756,20 @@ for svc_name in "${SVC_NAMES[@]}"; do
   db_user="${SVC_DB_USERS[$svc_name]}"
   db_pass="${SVC_DB_PASSES[$svc_name]}"
 
-  if [[ ! "$db_name" =~ ^[A-Za-z0-9_]+$ || ! "$db_user" =~ ^[A-Za-z0-9_]+$ || ! "$db_pass" =~ ^[A-Za-z0-9]+$ ]]; then
-    echo "❌ Kredensial DB service '$svc_name' tidak valid; nama hanya boleh berisi huruf, angka, dan underscore." >&2
+  if [[ ! "$db_name" =~ ^[A-Za-z0-9_]+$ || -z "$db_user" || "$db_user" == *$'\n'* || "$db_pass" == *$'\n'* ]]; then
+    echo "❌ Kredensial DB service '$svc_name' tidak valid; DB_DATABASE harus memakai huruf, angka, atau underscore, user/password tidak boleh kosong atau berisi baris baru." >&2
     exit 1
   fi
 
   log "Menyiapkan database sentral '$db_name' untuk service '$svc_name'..."
+  SQL_DB_USER="${db_user//\\/\\\\}"
+  SQL_DB_USER="${SQL_DB_USER//\'/\'\'}"
+  SQL_DB_PASS="${db_pass//\\/\\\\}"
+  SQL_DB_PASS="${SQL_DB_PASS//\'/\'\'}"
   docker exec -i "$CENTRAL_DB_CONTAINER" mysql -uroot -p"$CENTRAL_DB_ROOT_PASS" -e "
     CREATE DATABASE IF NOT EXISTS \`${db_name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-    CREATE USER IF NOT EXISTS '${db_user}'@'%' IDENTIFIED BY '${db_pass}';
-    ALTER USER '${db_user}'@'%' IDENTIFIED BY '${db_pass}';
+    CREATE USER IF NOT EXISTS '${SQL_DB_USER}'@'%' IDENTIFIED BY '${SQL_DB_PASS}';
+    ALTER USER '${SQL_DB_USER}'@'%' IDENTIFIED BY '${SQL_DB_PASS}';
     GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${db_user}'@'%';
     FLUSH PRIVILEGES;
   " >/dev/null
@@ -759,7 +778,6 @@ done
 SERVICES_ARG=""
 PHP_VERS_ARG=""
 COMP_VERS_ARG=""
-DB_CREDS_ARG=""
 SVC_PATHS_ARG=""
 for svc_name in "${SVC_NAMES[@]}"; do
   [[ -n "$SERVICES_ARG" ]] && SERVICES_ARG+=","
@@ -770,9 +788,6 @@ for svc_name in "${SVC_NAMES[@]}"; do
 
   [[ -n "$COMP_VERS_ARG" ]] && COMP_VERS_ARG+=","
   COMP_VERS_ARG+="${svc_name}:${SVC_COMPOSER_VERSIONS[$svc_name]}"
-
-  [[ -n "$DB_CREDS_ARG" ]] && DB_CREDS_ARG+="|"
-  DB_CREDS_ARG+="${svc_name}:${SVC_DB_NAMES[$svc_name]}:${SVC_DB_USERS[$svc_name]}:${SVC_DB_PASSES[$svc_name]}"
 
   [[ -n "${SVC_PATHS_ARG:-}" ]] && SVC_PATHS_ARG+=","
   SVC_PATHS_ARG+="${svc_name}:${SVC_PATHS[$svc_name]}"
@@ -786,11 +801,9 @@ python3 "$SCRIPTS_DIR/generate_compose.py" \
   --docker-dir        "$DOCKER_DIR" \
   --gateway-port      "$GATEWAY_PORT" \
   --memory-limit      "$MEMORY_LIMIT" \
-  --central-db-host   "$CENTRAL_DB_CONTAINER" \
   --central-db-network "$CENTRAL_DB_NETWORK" \
   --php-versions      "$PHP_VERS_ARG" \
   --composer-versions "$COMP_VERS_ARG" \
-  --db-creds          "$DB_CREDS_ARG" \
   --output-dir        "$PROJECT_PATH"
 
 cp "$TEMPLATE_DIR/Dockerfile" "$DOCKER_DIR/Dockerfile"
@@ -816,29 +829,15 @@ cp "$TEMPLATE_DIR/gateway-httpd.conf" "$GATEWAY_DIR/httpd.conf"
 
 for svc_name in "${SVC_NAMES[@]}"; do
   svc_path="${SVC_PATHS[$svc_name]}"
-  db_name="${SVC_DB_NAMES[$svc_name]}"
-  db_user="${SVC_DB_USERS[$svc_name]}"
-  db_pass="${SVC_DB_PASSES[$svc_name]}"
 
   cd "$svc_path"
-  [[ ! -f .env ]] && ([[ -f .env.example ]] && cp .env.example .env || touch .env)
-
-  set_clean_env() {
-    local key="$1" val="$2"
-    if grep -q "^${key}=" .env 2>/dev/null; then
-      sed -i "s|^${key}=.*|${key}=${val}|" .env
-    else
-      echo "${key}=${val}" >> .env
-    fi
-  }
-
-  set_clean_env "DB_CONNECTION" "mysql"
-  set_clean_env "DB_HOST"       "$CENTRAL_DB_CONTAINER"
-  set_clean_env "DB_PORT"       "3306"
-  set_clean_env "DB_DATABASE"   "$db_name"
-  set_clean_env "DB_USERNAME"   "$db_user"
-  set_clean_env "DB_PASSWORD"   "$db_pass"
-  set_clean_env "APP_URL"       "http://localhost:${GATEWAY_PORT}/${svc_name}"
+  set_clean_env "$svc_path/.env" DB_CONNECTION mysql
+  set_clean_env "$svc_path/.env" DB_HOST "$CENTRAL_DB_CONTAINER"
+  set_clean_env "$svc_path/.env" DB_PORT 3306
+  set_clean_env "$svc_path/.env" DB_DATABASE "${SVC_DB_NAMES[$svc_name]}"
+  set_clean_env "$svc_path/.env" DB_USERNAME "${SVC_DB_USERS[$svc_name]}"
+  set_clean_env "$svc_path/.env" DB_PASSWORD "${SVC_DB_PASSES[$svc_name]}"
+  set_clean_env "$svc_path/.env" APP_URL "http://localhost:${GATEWAY_PORT}/${svc_name}"
 done
 
 log "Menjalankan stack microservices..."
