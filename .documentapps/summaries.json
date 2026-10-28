@@ -6,13 +6,13 @@
     "summary": "Konfigurasi utama LaDock untuk root deployment, MySQL sentral pada port host 3310, port default aplikasi, batas memori default per service, serta lokasi template, skrip, log, dan dump database."
   },
   "README.md": {
-    "summary": "Dokumentasi LaDock v3.0 tentang deployment monolith/microservices dengan pemilihan port HTTP otomatis, batas memori default/custom per service, ekstraksi arsip, deteksi stack, dashboard web, dan backup/restore."
+    "summary": "Dokumentasi LaDock v3.0 tentang deployment runtime multi-bahasa dan versi per service, Dockerfile proyek, auto-port, batas memori, database sentral, dashboard, dan backup/restore."
   },
   "central_db.sh": {
     "summary": "Skrip pengelola MySQL sentral yang menyiapkan network/container, memigrasikan data ke bind mount lokal, membersihkan symlink socket stale sebelum/sesudah startup dan saat stop, menangani container restarting, serta menunggu kesiapan database."
   },
   "deploy.sh": {
-    "summary": "Entry point deployment LaDock yang memilih port HTTP kosong otomatis, menolak project duplikat/parallel deployment, membaca kredensial DB hanya dari .env, dan mengarahkan service ke MySQL sentral."
+    "summary": "Entry point deployment LaDock yang mendeteksi stack/versi tiap service, membangun runtime yang sesuai, memilih port otomatis, mencegah duplikasi, memprioritaskan Dockerfile proyek, dan mengarahkan DB ke MySQL sentral."
   },
   "destroy.sh": {
     "summary": "Skrip untuk menemukan project berdasarkan nama atau path dan menghentikan container Compose aplikasi/database pada layout baru maupun legacy, dengan opsi menghapus image."
@@ -45,10 +45,10 @@
     "summary": "Skrip untuk memulihkan database ke container MySQL sentral dari mysql/db/<app_name>/data.sql atau file SQL yang ditentukan."
   },
   "scripts/db_import.py": {
-    "summary": "Utilitas Python untuk mendeteksi file dump SQL, memprioritaskan folder mysql/db/<app_name>/, dan mengimpornya ke database MySQL sentral."
+    "summary": "Utilitas Python untuk mendeteksi file dump SQL, memprioritaskan folder mysql/db/<app_name>/, menormalisasi direktif database dengan aman, dan mengimpornya ke database MySQL sentral."
   },
   "scripts/detect_stack.py": {
-    "summary": "Pemindai dependensi dan stack multi-bahasa (PHP, Node.js, Python, Go, Ruby, Java) dan framework (Laravel, Express, Django, dll.), mengekstrak versi runtime dan ekstensi, lalu menyimpannya ke stack.json."
+    "summary": "Mendeteksi stack PHP, Node.js, Python, Go, Ruby, dan Java; membaca runtime Dockerfile proyek atau versi dari file versi, tool-versions, dan manifest; lalu menyimpan versi, sumber, constraint, framework, serta dependensi ke stack.json."
   },
   "scripts/detect_php_version.py": {
     "summary": "Mendeteksi constraint versi PHP dari composer.json project Laravel dengan fallback versi yang didukung."
@@ -66,10 +66,19 @@
     "summary": "Memindai direktori secara rekursif untuk menemukan root project Laravel berdasarkan file artisan, sebagai dasar pemetaan deployment."
   },
   "scripts/find_microservices.py": {
-    "summary": "Memindai sub-project Laravel untuk deployment microservices dan menghasilkan pemetaan service beserta informasi port/aplikasi yang diperlukan generator Compose."
+    "summary": "Memindai sub-project PHP, Node.js, Python, Go, Ruby, dan Java untuk deployment microservices; mengenali instalasi WordPress sebagai satu aplikasi agar plugin/library tidak menjadi service terpisah."
   },
   "scripts/generate_compose.py": {
-    "summary": "Membangun Compose microservices yang memuat environment dari .env masing-masing service, menggunakan network DB sentral, dan menerapkan batas memori per service."
+    "summary": "Membangun Compose microservices sesuai metadata runtime dan port container tiap service, memuat .env, menggunakan network DB sentral, dan menerapkan batas memori."
+  },
+  "scripts/generate_runtime_compose.py": {
+    "summary": "Menghasilkan file Compose monolith untuk runtime khusus/proyek, dengan port internal runtime, .env, network DB sentral, dan batas memori."
+  },
+  "scripts/runtime_build.py": {
+    "summary": "Memakai Dockerfile proyek jika tersedia atau membuat Dockerfile PHP, Node.js, Python, Go, Ruby, dan Spring Boot Java berdasarkan versi runtime, entrypoint, dan port."
+  },
+  "scripts/update_wordpress_config.py": {
+    "summary": "Mengarahkan konfigurasi DB dan URL WordPress ke environment deployment, menyesuaikan REQUEST_URI dan aturan .htaccess untuk gateway path-based, serta memperbaiki perbandingan query kosong pada WordPress lama untuk PHP 8."
   },
   "scripts/env_config.py": {
     "summary": "Membaca dan memperbarui variabel dotenv tanpa mengeksekusi isinya, mempertahankan nilai aplikasi yang tidak terkait dan mendukung kredensial dengan karakter khusus."
@@ -77,11 +86,14 @@
   "scripts/check_duplicate_deploy.py": {
     "summary": "Mendeteksi deployment proyek yang sudah ada melalui file Compose atau nama container, termasuk deployment lama di direktori legacy."
   },
+  "scripts/update_adodb_config.py": {
+    "summary": "Memperbarui konfigurasi ADOdb PHP lama ke mysqli, menyelaraskan kredensial dari .env, dan memperbaiki signature, hasil query non-recordset, offset kurung kurawal, serta constructor patTemplate agar kompatibel dengan PHP 8."
+  },
   "scripts/find_free_ports.py": {
     "summary": "Memeriksa port TCP yang terpakai oleh proses host dan binding Docker, lalu mencari port kosong mulai dari port awal dengan kenaikan satu dan mendukung port yang dikecualikan."
   },
   "scripts/generate_gateway_conf.py": {
-    "summary": "Menghasilkan konfigurasi Apache API Gateway untuk perutean prefix URL microservices."
+    "summary": "Menghasilkan konfigurasi Apache API Gateway untuk perutean prefix URL ke port internal runtime masing-masing microservice."
   },
   "scripts/start_ui.sh": {
     "summary": "Skrip pengelola lifecycle server LaDock Control Center (start di background, status, stop, logs, run foreground)."
@@ -90,7 +102,7 @@
     "summary": "Daftar file dan folder yang diabaikan saat build Docker image (node_modules, vendor, dump sql, docker-compose, logs)."
   },
   "templates/Dockerfile": {
-    "summary": "Template image universal PHP + Apache untuk aplikasi hasil deployment (menyalin dari src/ dengan ekstensi lengkap)."
+    "summary": "Template image universal PHP + Apache dengan ekstensi mysqli dan PDO MySQL; source disediakan lewat bind mount agar context build tidak menyalin seluruh aplikasi."
   },
   "templates/apache-vhost.conf.tpl": {
     "summary": "Template konfigurasi VirtualHost Apache untuk aplikasi web."
@@ -140,7 +152,25 @@
   "tests/test_check_duplicate_deploy.py": {
     "summary": "Tes normalisasi slug dan deteksi marker/container deployment agar project yang sama tidak ter-deploy dua kali."
   },
+  "tests/test_update_adodb_config.py": {
+    "summary": "Tes migrasi konfigurasi ADOdb ke mysqli, pembaruan signature driver legacy, dan validasi nilai koneksi database."
+  },
+  "tests/test_dockerfile_template.py": {
+    "summary": "Tes image PHP menyertakan mysqli dan memakai bind mount Compose untuk source tanpa menyalin source besar ke image."
+  },
   "tests/test_find_free_ports.py": {
     "summary": "Tes pemilihan port kosong, port pengecualian, kondisi kehabisan port, dan parsing binding port Docker IPv4/IPv6."
+  },
+  "tests/test_runtime_build.py": {
+    "summary": "Tes pembuatan Dockerfile runtime PHP, Node.js, Python, Go, Ruby, Java serta prioritas Dockerfile proyek dan validasi entrypoint."
+  },
+  "tests/test_generate_runtime_compose.py": {
+    "summary": "Tes Compose monolith runtime-specific untuk port internal, environment, network, memori, dan validasi input."
+  },
+  "tests/test_find_microservices.py": {
+    "summary": "Tes pemindaian aplikasi microservice lintas bahasa dan pemisahan service agar dependency bertingkat tidak terdeteksi sebagai service baru."
+  },
+  "tests/test_generate_gateway_conf.py": {
+    "summary": "Tes routing gateway Apache ke port internal yang berbeda untuk setiap runtime service."
   }
 }

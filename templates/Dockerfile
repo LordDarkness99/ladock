@@ -26,17 +26,12 @@ RUN (sed -i 's|http://deb.debian.org/debian-security|http://archive.debian.org/d
  && echo "ServerName localhost" >> /etc/apache2/apache2.conf \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+RUN docker-php-ext-install mysqli
+
 # Copy Composer dari stage composer
 COPY --from=composer /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www
-
-# Salin source code dari src/ ke dalam container
-COPY src/ /var/www/
-
-RUN mkdir -p storage bootstrap/cache public \
-    && chown -R www-data:www-data storage bootstrap/cache public 2>/dev/null || true \
-    && chmod -R 775 storage bootstrap/cache public 2>/dev/null || true
 
 EXPOSE 80
 CMD ["apache2-foreground"]

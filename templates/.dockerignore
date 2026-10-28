@@ -9,4 +9,9 @@ vendor
 logs
 mysql
 stack.json
+.ladock-runtime.json
+.env
+.env.*
+**/.env
+**/.env.*
 docker-compose*.yml

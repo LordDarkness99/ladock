@@ -44,6 +44,20 @@ def _pairs(raw: str) -> dict[str, str]:
     return result
 
 
+def _runtime_for_service(service_path: str) -> dict:
+    metadata_path = os.path.join(service_path, ".ladock-runtime.json")
+    if not os.path.isfile(metadata_path):
+        return {
+            "language": "PHP",
+            "container_port": 80,
+            "working_dir": "/var/www",
+            "dockerfile": "Dockerfile",
+            "custom_dockerfile": False,
+        }
+    with open(metadata_path, encoding="utf-8") as file:
+        return json.load(file)
+
+
 def build_app_compose(
     project: str,
     services: list[dict],
@@ -88,32 +102,55 @@ def build_app_compose(
         php_ver = php_versions.get(sname, "8.4")
         comp_ver = composer_versions.get(sname, "2")
         svc_context = (service_paths or {}).get(sname, ".")
+        runtime = _runtime_for_service(svc_context)
         dockerfile = f"{docker_dir}/Dockerfile"
         vhost_mount = f"{docker_dir}/apache-vhost.conf"
 
         lines += [
             "",
             f"  app_{sname}:",
-            f"    build:",
+            "    build:",
             f"      context: {svc_context}",
-            f"      dockerfile: {dockerfile}",
-            f"      args:",
-            f'        PHP_VERSION: "{php_ver}"',
-            f'        COMPOSER_VERSION: "{comp_ver}"',
+        ]
+        if runtime["language"] == "PHP" and not runtime["custom_dockerfile"]:
+            lines += [
+                f"      dockerfile: {dockerfile}",
+                "      args:",
+                f'        PHP_VERSION: "{php_ver}"',
+                f'        COMPOSER_VERSION: "{comp_ver}"',
+            ]
+        else:
+            lines.append(f"      dockerfile: {runtime['dockerfile']}")
+
+        container_port = int(runtime["container_port"])
+        lines += [
             f"    container_name: {project}_{sname}_app",
-            f"    restart: unless-stopped",
+            "    restart: unless-stopped",
             f"    mem_limit: {memory_limit}",
-            f"    working_dir: /var/www",
-            f"    env_file:",
+            f"    working_dir: {runtime['working_dir']}",
+            "    env_file:",
             f"      - {json.dumps(os.path.join(svc_context, '.env'))}",
-            f"    ports:",
-            f'      - "{http_port}:80"',
-            f"    volumes:",
-            f"      - {svc_context}:/var/www",
-            f"      - {vhost_mount}:/etc/apache2/sites-available/000-default.conf:ro",
-            f"    environment:",
-            f'      APP_ENV: "local"',
-            f"    networks:",
+            "    environment:",
+            '      APP_ENV: "local"',
+            f'      PORT: "{container_port}"',
+            f'      SERVER_PORT: "{container_port}"',
+        ]
+        if runtime["language"] == "PHP" and not runtime["custom_dockerfile"]:
+            lines.append(
+                f'      LADOCK_DOCUMENT_ROOT: "{runtime.get("document_root", "/var/www/public")}"'
+            )
+        lines += [
+            "    ports:",
+            f'      - "{http_port}:{container_port}"',
+        ]
+        if runtime["language"] == "PHP" and not runtime["custom_dockerfile"]:
+            lines += [
+                "    volumes:",
+                f"      - {svc_context}:/var/www",
+                f"      - {vhost_mount}:/etc/apache2/sites-available/000-default.conf:ro",
+            ]
+        lines += [
+            "    networks:",
             f"      - {central_db_network}",
         ]
 

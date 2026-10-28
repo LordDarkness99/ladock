@@ -19,10 +19,26 @@ Usage:
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 
 SKIP_DIRS = {"vendor", "node_modules", ".git", ".docker", "storage", "bootstrap"}
+
+
+def prepare_dump_sql(content: str, db_name: str) -> str:
+    """Remove standalone database-selection statements without touching row data."""
+    database_directive = re.compile(
+        r"^\s*(?:(?:/\*!\d+\s*)?(?:CREATE\s+DATABASE|DROP\s+DATABASE|USE)\b[^;\r\n]*(?:;|\*/;?)\s*(?:\*/)?|(?:CREATE\s+DATABASE|DROP\s+DATABASE|USE)\b[^;\r\n]*;)\s*$",
+        re.IGNORECASE,
+    )
+    lines = [line for line in content.splitlines() if not database_directive.fullmatch(line)]
+    return (
+        f"USE `{db_name}`;\n"
+        "SET FOREIGN_KEY_CHECKS=0;\n"
+        + "\n".join(lines)
+        + "\nSET FOREIGN_KEY_CHECKS=1;\n"
+    )
 
 
 def find_dump_files(project_path: str):
@@ -113,17 +129,12 @@ def main():
             "mysql", "-uroot", f"-p{args.db_root_pass}", args.db_name,
         ]
 
-    import re
+    import_errors = []
     for dump_path in dump_files:
         print(f"-> Mengimpor '{os.path.basename(dump_path)}' ke database '{args.db_name}' ...")
         try:
             with open(dump_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
-            content = re.sub(r'(?i)CREATE\s+DATABASE\s+[^;]+;', '', content)
-            content = re.sub(r'(?i)DROP\s+DATABASE\s+[^;]+;', '', content)
-            content = re.sub(r'(?i)USE\s+[^;]+;', '', content)
-
-            sql_input = f"USE `{args.db_name}`;\nSET FOREIGN_KEY_CHECKS=0;\n{content}\nSET FOREIGN_KEY_CHECKS=1;\n".encode("utf-8")
+                sql_input = prepare_dump_sql(f.read(), args.db_name).encode("utf-8")
             result = subprocess.run(dc_cmd, input=sql_input)
         except FileNotFoundError:
             print(f"Perintah '{args.dc}' tidak ditemukan.", file=sys.stderr)
@@ -131,7 +142,10 @@ def main():
 
         if result.returncode != 0:
             print(f"Import database '{os.path.basename(dump_path)}' gagal.", file=sys.stderr)
+            import_errors.append(dump_path)
 
+    if import_errors:
+        sys.exit(1)
     print("Import database selesai.")
 
 

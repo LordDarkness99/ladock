@@ -9,5 +9,6 @@ COPY httpd.conf /usr/local/apache2/conf/httpd.conf
 
 # Buat folder htdocs (untuk dashboard HTML)
 RUN mkdir -p /usr/local/apache2/htdocs
+COPY dashboard.html /usr/local/apache2/htdocs/dashboard.html
 
 EXPOSE 80

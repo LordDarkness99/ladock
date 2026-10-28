@@ -1,8 +1,8 @@
 <VirtualHost *:80>
     ServerName localhost
-    DocumentRoot __DOCUMENT_ROOT__
+    DocumentRoot "__DOCUMENT_ROOT__"
 
-    <Directory __DOCUMENT_ROOT__>
+    <Directory "__DOCUMENT_ROOT__">
         Options Indexes FollowSymLinks
         AllowOverride All
         Require all granted

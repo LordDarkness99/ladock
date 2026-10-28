@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
-Scanner rekursif untuk menemukan semua sub-project Laravel di dalam
-sebuah folder induk. Tidak bergantung pada struktur folder tertentu —
-cukup cari folder yang mengandung file `artisan` dan `composer.json`.
+Scanner rekursif untuk menemukan sub-project aplikasi yang didukung LaDock.
 
 Fitur:
   - Scan rekursif hingga kedalaman MAX_DEPTH (default 5)
@@ -62,10 +60,54 @@ def _service_name_from_composer(composer_path: str) -> str | None:
     return None
 
 
-def _is_laravel(path: str) -> bool:
-    """Cek apakah sebuah folder adalah project Laravel."""
-    return os.path.isfile(os.path.join(path, "artisan")) and \
-           os.path.isfile(os.path.join(path, "composer.json"))
+def _is_wordpress_app(path: str) -> bool:
+    return (
+        os.path.isfile(os.path.join(path, "wp-config.php"))
+        or os.path.isfile(os.path.join(path, "wp-load.php"))
+        or os.path.isfile(os.path.join(path, "wp-settings.php"))
+        or (
+            os.path.isdir(os.path.join(path, "wp-admin"))
+            and os.path.isdir(os.path.join(path, "wp-includes"))
+        )
+    )
+
+
+def _is_supported_app(path: str) -> bool:
+    """Return whether a directory is an application rather than a dependency."""
+    if _is_wordpress_app(path):
+        return True
+
+    php_entrypoints = (
+        "artisan",
+        "spark",
+        "index.php",
+        "public/index.php",
+        "web/index.php",
+        "bin/console",
+    )
+    if os.path.isfile(os.path.join(path, "composer.json")):
+        return (
+            os.path.isfile(os.path.join(path, "Dockerfile"))
+            or any(
+                os.path.isfile(os.path.join(path, item))
+                for item in php_entrypoints
+            )
+        )
+
+    manifests = {
+        "composer.json",
+        "package.json",
+        "requirements.txt",
+        "Pipfile",
+        "pyproject.toml",
+        "go.mod",
+        "Gemfile",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "Dockerfile",
+    }
+    return any(os.path.isfile(os.path.join(path, manifest)) for manifest in manifests)
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +120,7 @@ def scan(root: str, max_depth: int = MAX_DEPTH_DEFAULT) -> list[dict]:
       [{"name": str, "path": str}, ...]
 
     Aturan:
-      1. Folder yang mengandung `artisan` + `composer.json` = satu service.
+      1. Folder yang mengandung manifest runtime yang dikenal = satu service.
          Tidak lagi di-scan ke dalam (service tidak boleh bersarang).
       2. Folder di SKIP_DIRS atau diawali titik diabaikan.
       3. Scan sampai max_depth level ke bawah.
@@ -99,11 +141,14 @@ def scan(root: str, max_depth: int = MAX_DEPTH_DEFAULT) -> list[dict]:
             full = os.path.join(current_path, entry)
             if not os.path.isdir(full):
                 continue
+            if _is_wordpress_app(full):
+                found.append({"name": _sanitize_name(entry), "path": full})
+                continue
             if entry in SKIP_DIRS or entry.startswith("."):
                 continue
 
-            if _is_laravel(full):
-                # Nama service: prefer dari composer.json, fallback ke nama folder
+            if _is_supported_app(full):
+                # Prefer package name from composer.json; otherwise use the directory.
                 name = _service_name_from_composer(
                     os.path.join(full, "composer.json")
                 ) or _sanitize_name(entry)
@@ -112,8 +157,8 @@ def scan(root: str, max_depth: int = MAX_DEPTH_DEFAULT) -> list[dict]:
             else:
                 _walk(full, depth + 1)
 
-    # Cek apakah root itu sendiri adalah laravel project (monolith biasa)
-    if _is_laravel(root):
+    # Treat a root-level app as one service rather than splitting nested dependencies.
+    if _is_supported_app(root):
         name = _service_name_from_composer(
             os.path.join(root, "composer.json")
         ) or _sanitize_name(os.path.basename(root))

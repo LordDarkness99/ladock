@@ -72,11 +72,12 @@ def build_gateway_conf(project: str, services: list[dict], gateway_port: int) ->
 
     for svc in services:
         sname = svc["name"]
+        container_port = svc.get("container_port", 80)
         lines += [
             f"",
-            f"    # [{sname}] -> http://app_{sname}:80",
-            f"    ProxyPass        /{sname}/  http://app_{sname}:80/",
-            f"    ProxyPassReverse /{sname}/  http://app_{sname}:80/",
+            f"    # [{sname}] -> http://app_{sname}:{container_port}",
+            f"    ProxyPass        /{sname}/  http://app_{sname}:{container_port}/",
+            f"    ProxyPassReverse /{sname}/  http://app_{sname}:{container_port}/",
         ]
 
     # ── Discovery dashboard ───────────────────────────────────────────────
@@ -97,7 +98,7 @@ def build_gateway_conf(project: str, services: list[dict], gateway_port: int) ->
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{project} — Microservice Gateway</title>
+<title>{project} &mdash; Microservice Gateway</title>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{
@@ -203,15 +204,7 @@ def build_gateway_conf(project: str, services: list[dict], gateway_port: int) ->
     # Embed dashboard as Alias + static file (simpler approach: serve inline via ErrorDocument trick)
     lines += [
         "",
-        "    # ── Root: Discovery Dashboard ──────────────────────────",
-        "    Alias /gateway-dashboard /usr/local/apache2/htdocs/dashboard.html",
-        "    <Location />",
-        "        # Intercept bare root request only, forward anything else",
-        "    </Location>",
-        "",
-        "    RewriteEngine On",
-        "    # If request is exactly '/', serve the dashboard",
-        "    RewriteRule ^/?$  /gateway-dashboard [L]",
+        "    # Root dashboard is served by DirectoryIndex in gateway-httpd.conf.",
         "",
         "</VirtualHost>",
     ]
@@ -232,11 +225,20 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--project",      required=True)
     ap.add_argument("--services",     required=True, help="'name1:port1,name2:port2,...'")
+    ap.add_argument("--container-ports", default="", help="'name1:port1,name2:port2,...'")
     ap.add_argument("--gateway-port", required=True, type=int)
     args = ap.parse_args()
 
     svc_ports = _pairs(args.services)
-    services  = [{"name": n, "http_port": int(p)} for n, p in svc_ports.items()]
+    container_ports = _pairs(args.container_ports)
+    services = [
+        {
+            "name": n,
+            "http_port": int(p),
+            "container_port": int(container_ports.get(n, "80")),
+        }
+        for n, p in svc_ports.items()
+    ]
 
     if not services:
         print("Tidak ada service.", file=sys.stderr)
