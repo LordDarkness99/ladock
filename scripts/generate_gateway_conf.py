@@ -75,6 +75,9 @@ def build_gateway_conf(project: str, services: list[dict], gateway_port: int) ->
         lines += [
             f"",
             f"    # [{sname}] -> http://app_{sname}:{container_port}",
+            f"    <Location /{sname}/>",
+            f"        ProxyPreserveHost On",
+            f"    </Location>",
             f"    ProxyPassReverseCookiePath / /{sname}/",
             f"    ProxyPass        /{sname}/  http://app_{sname}:{container_port}/",
             f"    ProxyPassReverse /{sname}/  http://app_{sname}:{container_port}/",
