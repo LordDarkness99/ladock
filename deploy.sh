@@ -998,13 +998,31 @@ python3 "$SCRIPTS_DIR/generate_compose.py" \
   --central-db-network "$CENTRAL_DB_NETWORK" \
   --php-versions      "$PHP_VERS_ARG" \
   --composer-versions "$COMP_VERS_ARG" \
+  --vhost-dir         "$DOCKER_DIR/vhosts" \
   --output-dir        "$PROJECT_PATH"
 
 cp "$TEMPLATE_DIR/Dockerfile" "$DOCKER_DIR/Dockerfile"
 [[ -f "$TEMPLATE_DIR/.dockerignore" ]] && cp "$TEMPLATE_DIR/.dockerignore" "$PROJECT_PATH/.dockerignore"
 
+# ── Generate vhost per-service dengan document root yang sudah ter-resolve ──
+VHOST_DIR="$DOCKER_DIR/vhosts"
+mkdir -p "$VHOST_DIR"
+SVC_DOC_ROOTS_ARG=""
+for svc_name in "${SVC_NAMES[@]}"; do
+  svc_path="${SVC_PATHS[$svc_name]}"
+  runtime_meta="$svc_path/.ladock-runtime.json"
+  doc_root="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("document_root", "/var/www"))' "$runtime_meta" 2>/dev/null || echo '/var/www')"
+  vhost_file="$VHOST_DIR/${svc_name}.conf"
+  sed -e "s|__PROJECT__|${PROJECT_NAME}_${svc_name}|g" \
+      -e "s|__DOCUMENT_ROOT__|${doc_root}|g" \
+      "$TEMPLATE_DIR/apache-vhost.conf.tpl" > "$vhost_file"
+  [[ -n "$SVC_DOC_ROOTS_ARG" ]] && SVC_DOC_ROOTS_ARG+=","
+  SVC_DOC_ROOTS_ARG+="${svc_name}:${doc_root}"
+done
+
+# Fallback: vhost generik (untuk kompatibilitas)
 sed -e "s/__PROJECT__/$PROJECT_NAME/g" \
-    -e 's|__DOCUMENT_ROOT__|${LADOCK_DOCUMENT_ROOT}|g' \
+    -e 's|__DOCUMENT_ROOT__|/var/www|g' \
     "$TEMPLATE_DIR/apache-vhost.conf.tpl" > "$DOCKER_DIR/apache-vhost.conf"
 
 GATEWAY_CONF_RAW="$(python3 "$SCRIPTS_DIR/generate_gateway_conf.py" \

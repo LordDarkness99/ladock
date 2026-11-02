@@ -59,7 +59,6 @@ def build_gateway_conf(project: str, services: list[dict], gateway_port: int) ->
         "<VirtualHost *:80>",
         f"    ServerName {project}.local",
         "",
-        "    ProxyPreserveHost On",
         "    ProxyRequests Off",
         "",
         "    # ── Security headers ────────────────────────────────────",
@@ -76,8 +75,10 @@ def build_gateway_conf(project: str, services: list[dict], gateway_port: int) ->
         lines += [
             f"",
             f"    # [{sname}] -> http://app_{sname}:{container_port}",
+            f"    ProxyPassReverseCookiePath / /{sname}/",
             f"    ProxyPass        /{sname}/  http://app_{sname}:{container_port}/",
             f"    ProxyPassReverse /{sname}/  http://app_{sname}:{container_port}/",
+            f"    ProxyPassReverse /{sname}/  http://app_{sname}/",
         ]
 
     # ── Discovery dashboard ───────────────────────────────────────────────

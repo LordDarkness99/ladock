@@ -66,6 +66,7 @@ def build_app_compose(
     composer_versions: dict[str, str],
     service_paths: dict[str, str] | None = None,
     docker_dir: str = ".docker",
+    vhost_dir: str | None = None,
     memory_limit: str = "512M",
     central_db_network: str = "ladock_net",
 ) -> str:
@@ -144,10 +145,16 @@ def build_app_compose(
             f'      - "{http_port}:{container_port}"',
         ]
         if runtime["language"] == "PHP" and not runtime["custom_dockerfile"]:
+            # Mount vhost per-service jika tersedia, fallback ke shared vhost
+            per_svc_vhost = os.path.join(vhost_dir, f"{sname}.conf") if vhost_dir else None
+            if per_svc_vhost and os.path.isfile(per_svc_vhost):
+                vhost_mount_path = per_svc_vhost
+            else:
+                vhost_mount_path = vhost_mount
             lines += [
                 "    volumes:",
                 f"      - {svc_context}:/var/www",
-                f"      - {vhost_mount}:/etc/apache2/sites-available/000-default.conf:ro",
+                f"      - {vhost_mount_path}:/etc/apache2/sites-available/000-default.conf:ro",
             ]
         lines += [
             "    networks:",
@@ -171,6 +178,7 @@ def main():
     ap.add_argument("--services",          required=True, help="'name1:port1,name2:port2,...'")
     ap.add_argument("--service-paths",     default="",   help="'name1:/path1,name2:/path2,...'")
     ap.add_argument("--docker-dir",        default=".docker", help="Path ke folder .docker/ (absolut)")
+    ap.add_argument("--vhost-dir",         default=None,      help="Folder berisi vhost per-service (opsional)")
     ap.add_argument("--gateway-port",      required=True, type=int)
     ap.add_argument("--memory-limit",      type=_validate_memory_limit, default="512M",
                     help="Batas memori untuk setiap service (contoh: 512M, 1G)")
@@ -198,6 +206,7 @@ def main():
         composer_versions=composer_versions,
         service_paths=service_paths,
         docker_dir=args.docker_dir,
+        vhost_dir=args.vhost_dir,
         memory_limit=args.memory_limit,
         central_db_network=args.central_db_network,
     )

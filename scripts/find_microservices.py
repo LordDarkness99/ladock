@@ -25,8 +25,13 @@ import sys
 # Folder yang SELALU dilewati saat scan
 SKIP_DIRS = {
     "vendor", "node_modules", ".git", ".hg", ".svn",
-    "storage", "bootstrap", "cache", "public",
+    "storage", "bootstrap", "cache",
     ".docker", "docker", ".idea", ".vscode", "__pycache__",
+}
+
+# Folder yang boleh ditelusuri untuk mencari sub-app, tapi BUKAN service sendiri
+PASS_THROUGH_DIRS = {
+    "public", "public_html", "www", "htdocs",
 }
 
 MAX_DEPTH_DEFAULT = 5
@@ -72,15 +77,53 @@ def _is_wordpress_app(path: str) -> bool:
     )
 
 
+def _is_codeigniter_app(path: str) -> bool:
+    """Deteksi CodeIgniter 2/3: ada folder application/ + index.php di root."""
+    return (
+        os.path.isfile(os.path.join(path, "index.php"))
+        and os.path.isdir(os.path.join(path, "application"))
+        and (
+            os.path.isfile(os.path.join(path, "application", "config", "config.php"))
+            or os.path.isfile(os.path.join(path, "application", "config", "database.php"))
+        )
+    )
+
+
+def _is_symfony1_app(path: str) -> bool:
+    """Deteksi Symfony 1.x: ada apps/, config/, index.php."""
+    return (
+        os.path.isfile(os.path.join(path, "index.php"))
+        and os.path.isdir(os.path.join(path, "apps"))
+        and os.path.isdir(os.path.join(path, "config"))
+        and (
+            os.path.isfile(os.path.join(path, "config", "databases.yml"))
+            or os.path.isfile(os.path.join(path, "config", "ProjectConfiguration.class.php"))
+        )
+    )
+
+
+def _is_legacy_php_app(path: str) -> bool:
+    """Deteksi aplikasi PHP native/legacy: ada index.php + minimal 1 sub-folder khas."""
+    if not os.path.isfile(os.path.join(path, "index.php")):
+        return False
+    # Hindari false positive: pastikan bukan sekadar file tunggal
+    php_files = [f for f in os.listdir(path) if f.endswith(".php")]
+    sub_dirs = [d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
+    return len(php_files) >= 2 or len(sub_dirs) >= 1
+
+
 def _is_supported_app(path: str) -> bool:
     """Return whether a directory is an application rather than a dependency."""
     if _is_wordpress_app(path):
+        return True
+    if _is_codeigniter_app(path):
+        return True
+    if _is_symfony1_app(path):
         return True
 
     php_entrypoints = (
         "artisan",
         "spark",
-        "index.php",
         "public/index.php",
         "web/index.php",
         "bin/console",
@@ -141,10 +184,21 @@ def scan(root: str, max_depth: int = MAX_DEPTH_DEFAULT) -> list[dict]:
             full = os.path.join(current_path, entry)
             if not os.path.isdir(full):
                 continue
+
+            # WordPress bisa ada di mana saja, cek duluan
             if _is_wordpress_app(full):
                 found.append({"name": _sanitize_name(entry), "path": full})
                 continue
-            if entry in SKIP_DIRS or entry.startswith("."):
+
+            if entry.startswith("."):
+                continue
+
+            # Folder pass-through (public, public_html, www): masuk tapi bukan service sendiri
+            if entry in PASS_THROUGH_DIRS:
+                _walk(full, depth)  # tidak tambah depth agar sub-app di dalamnya tetap terjangkau
+                continue
+
+            if entry in SKIP_DIRS:
                 continue
 
             if _is_supported_app(full):
@@ -158,15 +212,78 @@ def scan(root: str, max_depth: int = MAX_DEPTH_DEFAULT) -> list[dict]:
                 _walk(full, depth + 1)
 
     # Treat a root-level app as one service rather than splitting nested dependencies.
-    if _is_supported_app(root):
-        name = _service_name_from_composer(
-            os.path.join(root, "composer.json")
-        ) or _sanitize_name(os.path.basename(root))
-        found.append({"name": name, "path": root})
+    # Namun jika root adalah pass-through dir (public_html, dll), langsung scan isinya.
+    root_basename = os.path.basename(root)
+    if root_basename in PASS_THROUGH_DIRS:
+        _walk(root, 1)
+    elif _is_supported_app(root):
+        # Cek apakah ada sub-app yang lebih spesifik di dalam root
+        # (misalnya root/public/ berisi beberapa sub-app)
+        sub_services: list[dict] = []
+        for entry in sorted(os.listdir(root)):
+            if entry in PASS_THROUGH_DIRS:
+                sub_path = os.path.join(root, entry)
+                if os.path.isdir(sub_path):
+                    _walk(sub_path, 1)
+        if found:
+            # Ditemukan sub-app: mode microservice dari root
+            pass
+        else:
+            name = _service_name_from_composer(
+                os.path.join(root, "composer.json")
+            ) or _sanitize_name(root_basename)
+            found.append({"name": name, "path": root})
     else:
         _walk(root, 1)
 
     return found
+
+
+def _deduplicate_by_path(services: list[dict]) -> list[dict]:
+    """
+    Hapus service yang path-nya adalah direktori induk dari service lain.
+    Ini terjadi saat ada duplikasi: mis. src/individu dan src/public/individu.
+    Dalam kasus ini, kita prioritaskan path yang ada di dalam pass-through dir
+    (yaitu src/public/individu), bukan yang di level root (src/individu).
+
+    Juga hapus service yang benar-benar sama path-nya (path identik).
+    """
+    # Hapus path identik (keep first)
+    seen_paths: set[str] = set()
+    unique: list[dict] = []
+    for svc in services:
+        norm = os.path.normpath(svc["path"])
+        if norm not in seen_paths:
+            seen_paths.add(norm)
+            unique.append(svc)
+
+    # Deteksi pasangan duplikat berdasarkan nama folder terakhir
+    # Jika dua service punya basename sama, pilih yang lebih dalam (dalam pass-through dir)
+    by_basename: dict[str, list[dict]] = {}
+    for svc in unique:
+        bname = os.path.basename(svc["path"])
+        by_basename.setdefault(bname, []).append(svc)
+
+    result: list[dict] = []
+    for bname, candidates in by_basename.items():
+        if len(candidates) == 1:
+            result.extend(candidates)
+            continue
+        # Ada beberapa dengan basename yang sama.
+        # Prioritaskan yang ada di dalam pass-through dir.
+        in_passthrough = [
+            s for s in candidates
+            if os.path.basename(os.path.dirname(s["path"])) in PASS_THROUGH_DIRS
+        ]
+        not_in_passthrough = [
+            s for s in candidates
+            if os.path.basename(os.path.dirname(s["path"])) not in PASS_THROUGH_DIRS
+        ]
+        if in_passthrough:
+            result.extend(in_passthrough)
+        else:
+            result.extend(not_in_passthrough)
+    return result
 
 
 def _deduplicate_names(services: list[dict]) -> list[dict]:
@@ -209,6 +326,7 @@ def main():
         sys.exit(1)
 
     services = scan(root, max_depth)
+    services = _deduplicate_by_path(services)
     services = _deduplicate_names(services)
 
     if not services:
