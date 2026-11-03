@@ -136,6 +136,61 @@ class TestStackDetection(unittest.TestCase):
                 self.assertEqual(result["runtime_version"], expected_version)
                 self.assertEqual(result["runtime_version_source"], version_file)
 
+    def test_legacy_php_frameworks_select_a_compatible_runtime(self):
+        wordpress = Path(self.test_dir) / "wordpress"
+        (wordpress / "wp-includes").mkdir(parents=True)
+        (wordpress / "wp-config.php").write_text("<?php", encoding="utf-8")
+        (wordpress / "wp-includes/version.php").write_text(
+            "$wp_version = '5.5.3';\n", encoding="utf-8"
+        )
+        (wordpress / "index.php").write_text("<?php", encoding="utf-8")
+
+        codeigniter = Path(self.test_dir) / "codeigniter"
+        (codeigniter / "system/core").mkdir(parents=True)
+        (codeigniter / "system/core/CodeIgniter.php").write_text(
+            "define('CI_VERSION', '2.2.1');\n", encoding="utf-8"
+        )
+        (codeigniter / "index.php").write_text("<?php", encoding="utf-8")
+
+        symfony = Path(self.test_dir) / "symfony"
+        (symfony / "lib/vendor/symfony/lib/autoload").mkdir(parents=True)
+        (symfony / "lib/vendor/symfony/lib/autoload/sfCoreAutoload.class.php").write_text(
+            "define('SYMFONY_VERSION', '1.4.6');\n", encoding="utf-8"
+        )
+        (symfony / "web").mkdir()
+        (symfony / "web/index.php").write_text("<?php", encoding="utf-8")
+
+        for app, framework, framework_version in (
+            (wordpress, "WordPress", "5.5.3"),
+            (codeigniter, "CodeIgniter", "2.2.1"),
+            (symfony, "Symfony", "1.4.6"),
+        ):
+            with self.subTest(framework=framework):
+                result = detect_stack(str(app))
+                self.assertEqual(result["framework"], framework)
+                self.assertEqual(result["framework_version"], framework_version)
+                self.assertEqual(result["runtime_version"], "7.4")
+                self.assertEqual(result["runtime_version_source"], "legacy_compatibility")
+
+        (codeigniter / ".php-version").write_text("8.1\n", encoding="utf-8")
+        explicit = detect_stack(str(codeigniter))
+        self.assertEqual(explicit["runtime_version"], "8.1")
+        self.assertEqual(explicit["runtime_version_source"], ".php-version")
+
+    def test_legacy_native_php_application_uses_compatibility_runtime(self):
+        app_path = Path(self.test_dir) / "root_web"
+        (app_path / "lib/includes").mkdir(parents=True)
+        (app_path / "system/back-end").mkdir(parents=True)
+        (app_path / "lib/includes/path.php").write_text("<?php", encoding="utf-8")
+        (app_path / "system/back-end/main.php").write_text("<?php", encoding="utf-8")
+        (app_path / "index.php").write_text("<?php", encoding="utf-8")
+
+        result = detect_stack(str(app_path))
+
+        self.assertEqual(result["framework"], "Native PHP")
+        self.assertEqual(result["runtime_version"], "7.4")
+        self.assertEqual(result["runtime_version_source"], "legacy_compatibility")
+
     def test_python_and_java_versions_can_be_read_from_manifests(self):
         python_app = Path(self.test_dir) / "python_manifest"
         python_app.mkdir()

@@ -15,10 +15,10 @@ Menghasilkan Apache VirtualHost yang:
   - Merutekan  /auth/*   -> http://app_auth:80/
   - Merutekan  /user/*   -> http://app_user:80/
   - Merutekan  /order/*  -> http://app_order:80/
-  - Halaman /  (root)    -> HTML discovery dashboard (daftar semua service)
 """
 
 import argparse
+import re
 import sys
 
 
@@ -37,6 +37,13 @@ def _pairs(raw: str) -> dict[str, str]:
         k, _, v = item.partition(":")
         result[k.strip()] = v.strip()
     return result
+
+
+def _route_for_service(service: dict) -> str:
+    route = str(service.get("route", service["name"])).strip("/")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", route):
+        raise ValueError(f"Route gateway tidak valid untuk service {service['name']!r}: {route!r}")
+    return route
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +67,7 @@ def build_gateway_conf(project: str, services: list[dict], gateway_port: int) ->
         f"    ServerName {project}.local",
         "",
         "    ProxyRequests Off",
+        "    RedirectMatch 404 ^/$",
         "",
         "    # ── Security headers ────────────────────────────────────",
         '    Header always set X-Content-Type-Options "nosniff"',
@@ -71,154 +79,25 @@ def build_gateway_conf(project: str, services: list[dict], gateway_port: int) ->
 
     for svc in services:
         sname = svc["name"]
+        route = _route_for_service(svc)
         container_port = svc.get("container_port", 80)
         lines += [
             f"",
             f"    # [{sname}] -> http://app_{sname}:{container_port}",
-            f"    <Location /{sname}/>",
+            f"    <Location /{route}/>",
             f"        ProxyPreserveHost On",
+            f"        ProxyPassReverseCookiePath / /{route}/",
             f"    </Location>",
-            f"    ProxyPassReverseCookiePath / /{sname}/",
-            f"    ProxyPass        /{sname}/  http://app_{sname}:{container_port}/",
-            f"    ProxyPassReverse /{sname}/  http://app_{sname}:{container_port}/",
-            f"    ProxyPassReverse /{sname}/  http://app_{sname}/",
+            f"    ProxyPass        /{route}/  http://app_{sname}:{container_port}/",
+            f"    ProxyPassReverse /{route}/  http://app_{sname}:{container_port}/",
+            f"    ProxyPassReverse /{route}/  http://app_{sname}/",
         ]
 
-    # ── Discovery dashboard ───────────────────────────────────────────────
-    service_rows = ""
-    for svc in services:
-        sname = svc["name"]
-        http_port = svc["http_port"]
-        service_rows += (
-            f"<tr>"
-            f"<td><strong>{sname}</strong></td>"
-            f'<td><a href="/{sname}/" target="_blank">/{sname}/</a></td>'
-            f'<td><a href="http://localhost:{http_port}" target="_blank">:{http_port}</a></td>'
-            f"</tr>"
-        )
-
-    dashboard_html = f"""<!DOCTYPE html>
-<html lang="id">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{project} &mdash; Microservice Gateway</title>
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #e0e0e0;
-  }}
-  .card {{
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.1);
-    backdrop-filter: blur(20px);
-    border-radius: 16px;
-    padding: 2.5rem 3rem;
-    max-width: 720px;
-    width: 95%;
-    box-shadow: 0 8px 40px rgba(0,0,0,0.4);
-  }}
-  .badge {{
-    display: inline-block;
-    background: linear-gradient(90deg, #7c3aed, #3b82f6);
-    color: white;
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    border-radius: 999px;
-    padding: 4px 14px;
-    margin-bottom: 1rem;
-  }}
-  h1 {{
-    font-size: 1.9rem;
-    font-weight: 700;
-    margin-bottom: 0.3rem;
-    background: linear-gradient(90deg, #a78bfa, #60a5fa);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-  }}
-  p.sub {{
-    font-size: 0.9rem;
-    color: #9ca3af;
-    margin-bottom: 2rem;
-  }}
-  table {{
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.9rem;
-  }}
-  thead th {{
-    text-align: left;
-    color: #a78bfa;
-    font-size: 0.75rem;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-  }}
-  tbody tr {{
-    transition: background 0.2s;
-  }}
-  tbody tr:hover {{
-    background: rgba(255,255,255,0.06);
-  }}
-  tbody td {{
-    padding: 0.75rem;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
-  }}
-  a {{
-    color: #60a5fa;
-    text-decoration: none;
-    font-weight: 500;
-  }}
-  a:hover {{ text-decoration: underline; }}
-  .footer {{
-    margin-top: 2rem;
-    font-size: 0.75rem;
-    color: #6b7280;
-    text-align: center;
-  }}
-</style>
-</head>
-<body>
-<div class="card">
-  <div class="badge">Apache Microservice Gateway</div>
-  <h1>{project}</h1>
-  <p class="sub">Gateway port <strong>:{gateway_port}</strong> &mdash; Auto-deployed via ladock</p>
-  <table>
-    <thead>
-      <tr><th>Service</th><th>Gateway Route</th><th>Direct Port</th></tr>
-    </thead>
-    <tbody>
-      {service_rows}
-    </tbody>
-  </table>
-  <div class="footer">Generated automatically &bull; Edit via deploy.sh</div>
-</div>
-</body>
-</html>"""
-
-    # Embed dashboard as Alias + static file (simpler approach: serve inline via ErrorDocument trick)
     lines += [
-        "",
-        "    # Root dashboard is served by DirectoryIndex in gateway-httpd.conf.",
         "",
         "</VirtualHost>",
     ]
-
-    config = "\n".join(lines) + "\n"
-    # Also produce a marker for the dashboard html (written separately by deploy.sh)
-    config += f"\n# __DASHBOARD_HTML_MARKER__\n"
-    config += dashboard_html
-
-    return config
+    return "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -229,16 +108,19 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--project",      required=True)
     ap.add_argument("--services",     required=True, help="'name1:port1,name2:port2,...'")
+    ap.add_argument("--routes",       default="", help="'name1:path1,name2:path2,...'")
     ap.add_argument("--container-ports", default="", help="'name1:port1,name2:port2,...'")
     ap.add_argument("--gateway-port", required=True, type=int)
     args = ap.parse_args()
 
     svc_ports = _pairs(args.services)
+    routes = _pairs(args.routes)
     container_ports = _pairs(args.container_ports)
     services = [
         {
             "name": n,
             "http_port": int(p),
+            "route": routes.get(n, n),
             "container_port": int(container_ports.get(n, "80")),
         }
         for n, p in svc_ports.items()

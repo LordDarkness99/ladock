@@ -15,7 +15,7 @@ def test_php_image_includes_mysqli_and_relies_on_compose_source_mounts():
     assert "./src:/var/www" in monolith_compose
 
 
-def test_gateway_image_includes_generated_root_dashboard():
+def test_gateway_image_does_not_bundle_a_service_dashboard():
     dockerfile = (ROOT / "templates" / "gateway.Dockerfile").read_text(
         encoding="utf-8"
     )
@@ -23,9 +23,9 @@ def test_gateway_image_includes_generated_root_dashboard():
         encoding="utf-8"
     )
 
-    assert "COPY dashboard.html /usr/local/apache2/htdocs/dashboard.html" in dockerfile
+    assert "COPY dashboard.html" not in dockerfile
     assert "LoadModule dir_module" in httpd_config
     assert "LoadModule mime_module" in httpd_config
     assert "TypesConfig conf/mime.types" in httpd_config
     assert "AddDefaultCharset UTF-8" in httpd_config
-    assert "DirectoryIndex dashboard.html" in httpd_config
+    assert "DirectoryIndex dashboard.html" not in httpd_config

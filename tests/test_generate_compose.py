@@ -127,3 +127,20 @@ def test_php_microservice_sets_document_root_from_runtime_metadata(tmp_path):
     )
 
     assert 'LADOCK_DOCUMENT_ROOT: "/var/www"' in compose
+
+
+def test_root_web_service_can_use_the_requested_direct_port(tmp_path):
+    root_web = tmp_path / "root_web"
+    root_web.mkdir()
+
+    compose = build_app_compose(
+        project="imunisasijtm",
+        services=[{"name": "root_web", "http_port": 8085}],
+        gateway_port=8080,
+        php_versions={"root_web": "8.2"},
+        composer_versions={"root_web": "2"},
+        service_paths={"root_web": str(root_web)},
+    )
+
+    assert "container_name: imunisasijtm_root_web_app" in compose
+    assert '"8085:80"' in compose

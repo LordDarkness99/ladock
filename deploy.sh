@@ -745,6 +745,26 @@ while IFS=$'\t' read -r svc_name svc_path; do
   SVC_PATHS["$svc_name"]="$svc_path"
 done <<< "$MICROSERVICE_LIST_RAW"
 
+EXPECTED_IMUNISASI_ORDER=(index2 individu surveylance tesis root_web)
+declare -A EXPECTED_IMUNISASI_SERVICE_SET=()
+HAS_ALL_IMUNISASI_SERVICES=1
+for expected_service in "${EXPECTED_IMUNISASI_ORDER[@]}"; do
+  EXPECTED_IMUNISASI_SERVICE_SET["$expected_service"]=1
+  [[ -n "${SVC_PATHS[$expected_service]:-}" ]] || HAS_ALL_IMUNISASI_SERVICES=0
+done
+if [[ "$HAS_ALL_IMUNISASI_SERVICES" -eq 1 ]]; then
+  ORDERED_SVC_NAMES=()
+  for expected_service in "${EXPECTED_IMUNISASI_ORDER[@]}"; do
+    ORDERED_SVC_NAMES+=("$expected_service")
+  done
+  for svc_name in "${SVC_NAMES[@]}"; do
+    if [[ -z "${EXPECTED_IMUNISASI_SERVICE_SET[$svc_name]:-}" ]]; then
+      ORDERED_SVC_NAMES+=("$svc_name")
+    fi
+  done
+  SVC_NAMES=("${ORDERED_SVC_NAMES[@]}")
+fi
+
 if [[ ${#SVC_NAMES[@]} -eq 0 ]]; then
   echo "❌ Tidak ada sub-project Laravel ditemukan di: $PROJECT_PATH"
   exit 1
@@ -784,9 +804,15 @@ declare -A SVC_DB_NAMES=()
 declare -A SVC_DB_USERS=()
 declare -A SVC_DB_PASSES=()
 declare -A SVC_LEGACY_DB_NAMES=()
+declare -A SVC_ROUTE_NAMES=()
 declare -A SVC_RUNTIME_NAMES=()
 declare -A SVC_RUNTIME_VERSIONS=()
 declare -A SVC_CONTAINER_PORTS=()
+
+for svc_name in "${SVC_NAMES[@]}"; do
+  SVC_ROUTE_NAMES["$svc_name"]="$svc_name"
+done
+[[ -n "${SVC_ROUTE_NAMES[root_web]:-}" ]] && SVC_ROUTE_NAMES[root_web]="admin"
 
 stop_existing_container "${PROJECT_NAME}_gateway"
 for svc_name in "${SVC_NAMES[@]}"; do
@@ -821,8 +847,8 @@ for svc_name in "${SVC_NAMES[@]}"; do
     --stack "$svc_path/stack.json" \
     --source "$svc_path" \
     --metadata "$svc_path/.ladock-runtime.json"
+  SVC_LEGACY_DB_NAMES["$svc_name"]="$(python3 "$SCRIPTS_DIR/legacy_db_config.py" database-name --service-dir "$svc_path")"
   if [[ -f "$svc_path/wp-config.php" ]]; then
-    SVC_LEGACY_DB_NAMES["$svc_name"]="$(python3 "$SCRIPTS_DIR/update_wordpress_config.py" --database-name "$svc_path/wp-config.php")"
     python3 "$SCRIPTS_DIR/update_wordpress_config.py" "$svc_path/wp-config.php"
   fi
   svc_runtime_info="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("primary_language", "Unknown")); print(d.get("runtime_version", "Unknown"))' "$svc_path/stack.json")"
@@ -855,7 +881,7 @@ echo " Gateway Port : $GATEWAY_PORT"
 echo " MySQL Host Port : $DEFAULT_DB_PORT (internal 3306)"
 echo " Services     : ${#SVC_NAMES[@]}"
 for svc_name in "${SVC_NAMES[@]}"; do
-  echo "   [$svc_name] ${SVC_RUNTIME_NAMES[$svc_name]} ${SVC_RUNTIME_VERSIONS[$svc_name]} | internal :${SVC_CONTAINER_PORTS[$svc_name]} | direct :${SVC_HTTP_PORTS[$svc_name]} | route /${svc_name}/"
+  echo "   [$svc_name] ${SVC_RUNTIME_NAMES[$svc_name]} ${SVC_RUNTIME_VERSIONS[$svc_name]} | internal :${SVC_CONTAINER_PORTS[$svc_name]} | direct :${SVC_HTTP_PORTS[$svc_name]} | route /${SVC_ROUTE_NAMES[$svc_name]}/"
 done
 hr
 
@@ -937,7 +963,7 @@ for svc_name in "${SVC_NAMES[@]}"; do
     CREATE DATABASE IF NOT EXISTS \`${db_name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
     CREATE USER IF NOT EXISTS '${SQL_DB_USER}'@'%' IDENTIFIED BY '${SQL_DB_PASS}';
     ALTER USER '${SQL_DB_USER}'@'%' IDENTIFIED BY '${SQL_DB_PASS}';
-    GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${db_user}'@'%';
+    GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${SQL_DB_USER}'@'%';
     FLUSH PRIVILEGES;
   " >/dev/null
   legacy_db_name="${SVC_LEGACY_DB_NAMES[$svc_name]:-}"
@@ -947,7 +973,7 @@ for svc_name in "${SVC_NAMES[@]}"; do
       table_count="$(docker exec -i "$CENTRAL_DB_CONTAINER" mysql -uroot -p"$CENTRAL_DB_ROOT_PASS" \
         -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$db_name';" 2>/dev/null || echo 0)"
       if [[ "${table_count:-0}" -eq 0 ]]; then
-        log "Mengimpor dump WordPress '$legacy_db_name' ke DB sentral service '$svc_name'..."
+        log "Mengimpor dump '$legacy_db_name' ke DB sentral service '$svc_name'..."
         python3 "$SCRIPTS_DIR/db_import.py" \
           --project-path "${SVC_PATHS[$svc_name]}" \
           --project-name "$PROJECT_NAME" \
@@ -957,10 +983,10 @@ for svc_name in "${SVC_NAMES[@]}"; do
           --central-db \
           --dump "$legacy_dump"
       else
-        info "Lewati import WordPress untuk '$svc_name' karena database sudah memiliki tabel."
+        info "Lewati import untuk '$svc_name' karena database sudah memiliki tabel."
       fi
     else
-      info "Dump '$legacy_db_name.sql' tidak ditemukan; database WordPress '$svc_name' tetap kosong."
+      info "Dump '$legacy_db_name.sql' tidak ditemukan untuk service '$svc_name'."
     fi
   fi
 done
@@ -969,6 +995,7 @@ SERVICES_ARG=""
 CONTAINER_PORTS_ARG=""
 PHP_VERS_ARG=""
 COMP_VERS_ARG=""
+SVC_ROUTES_ARG=""
 SVC_PATHS_ARG=""
 for svc_name in "${SVC_NAMES[@]}"; do
   [[ -n "$SERVICES_ARG" ]] && SERVICES_ARG+=","
@@ -982,6 +1009,9 @@ for svc_name in "${SVC_NAMES[@]}"; do
 
   [[ -n "$COMP_VERS_ARG" ]] && COMP_VERS_ARG+=","
   COMP_VERS_ARG+="${svc_name}:${SVC_COMPOSER_VERSIONS[$svc_name]}"
+
+  [[ -n "$SVC_ROUTES_ARG" ]] && SVC_ROUTES_ARG+=","
+  SVC_ROUTES_ARG+="${svc_name}:${SVC_ROUTE_NAMES[$svc_name]}"
 
   [[ -n "${SVC_PATHS_ARG:-}" ]] && SVC_PATHS_ARG+=","
   SVC_PATHS_ARG+="${svc_name}:${SVC_PATHS[$svc_name]}"
@@ -1028,14 +1058,11 @@ sed -e "s/__PROJECT__/$PROJECT_NAME/g" \
 GATEWAY_CONF_RAW="$(python3 "$SCRIPTS_DIR/generate_gateway_conf.py" \
   --project "$PROJECT_NAME" \
   --services "$SERVICES_ARG" \
+  --routes "$SVC_ROUTES_ARG" \
   --container-ports "$CONTAINER_PORTS_ARG" \
   --gateway-port "$GATEWAY_PORT")"
 
-GATEWAY_CONF="${GATEWAY_CONF_RAW%%# __DASHBOARD_HTML_MARKER__*}"
-DASHBOARD_HTML="${GATEWAY_CONF_RAW##*# __DASHBOARD_HTML_MARKER__}"
-
-echo "$GATEWAY_CONF" > "$DOCKER_DIR/apache-gateway.conf"
-echo "$DASHBOARD_HTML" > "$GATEWAY_DIR/dashboard.html"
+echo "$GATEWAY_CONF_RAW" > "$DOCKER_DIR/apache-gateway.conf"
 cp "$TEMPLATE_DIR/gateway.Dockerfile" "$GATEWAY_DIR/Dockerfile"
 cp "$TEMPLATE_DIR/gateway-httpd.conf" "$GATEWAY_DIR/httpd.conf"
 
@@ -1049,7 +1076,51 @@ for svc_name in "${SVC_NAMES[@]}"; do
   set_clean_env "$svc_path/.env" DB_DATABASE "${SVC_DB_NAMES[$svc_name]}"
   set_clean_env "$svc_path/.env" DB_USERNAME "${SVC_DB_USERS[$svc_name]}"
   set_clean_env "$svc_path/.env" DB_PASSWORD "${SVC_DB_PASSES[$svc_name]}"
-  set_clean_env "$svc_path/.env" APP_URL "http://localhost:${GATEWAY_PORT}/${svc_name}"
+  route_name="${SVC_ROUTE_NAMES[$svc_name]}"
+  set_clean_env "$svc_path/.env" APP_URL "http://localhost:${GATEWAY_PORT}/${route_name}"
+
+  if [[ -f "$svc_path/wp-config.php" ]]; then
+    python3 "$SCRIPTS_DIR/update_wordpress_config.py" "$svc_path/wp-config.php"
+  fi
+  if [[ -f "$svc_path/system/core/CodeIgniter.php" && -d "$svc_path/application" ]]; then
+    python3 "$SCRIPTS_DIR/update_adodb_config.py" \
+      --modernize-php4-constructor-root "$svc_path/application" \
+      --modernize-php4-constructor-root "$svc_path/system"
+  fi
+  python3 "$SCRIPTS_DIR/legacy_db_config.py" adapt \
+    --service-dir "$svc_path" \
+    --env "$svc_path/.env" \
+    --allow-http
+
+  for legacy_db_config in \
+    "$svc_path/public/lib/includes/database.php" \
+    "$svc_path/lib/includes/database.php"; do
+    if [[ -f "$legacy_db_config" ]]; then
+      ADO_ARGS=(--config "$legacy_db_config" --env "$svc_path/.env")
+      for adodb_driver in \
+        "$(dirname "$legacy_db_config")/../adodb/drivers/adodb-mysqli.inc.php" \
+        "$svc_path/public/lib/adodb/drivers/adodb-mysqli.inc.php" \
+        "$svc_path/lib/adodb/drivers/adodb-mysqli.inc.php"; do
+        [[ -f "$adodb_driver" ]] && ADO_ARGS+=(--driver "$adodb_driver")
+      done
+      for legacy_template_dir in \
+        "$svc_path/public/lib/patTemplates" \
+        "$svc_path/lib/patTemplates"; do
+        [[ -d "$legacy_template_dir" ]] && ADO_ARGS+=(--php-root "$legacy_template_dir")
+      done
+      for legacy_class_registry in \
+        "$svc_path/public/lib/class/load.class.php" \
+        "$svc_path/lib/class/load.class.php"; do
+        [[ -f "$legacy_class_registry" ]] && ADO_ARGS+=(--registry "$legacy_class_registry")
+      done
+      python3 "$SCRIPTS_DIR/update_adodb_config.py" "${ADO_ARGS[@]}"
+      break
+    fi
+  done
+
+  if [[ -f "$svc_path/config/databases.yml" ]]; then
+    python3 "$SCRIPTS_DIR/update_adodb_config.py" --php-root "$svc_path/lib"
+  fi
 done
 
 log "Menjalankan stack microservices..."

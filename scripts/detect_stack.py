@@ -276,6 +276,29 @@ def detect_php_version_from_composer(composer_data):
     return "8.2"
 
 
+def _legacy_framework_version(app_path: Path, framework: str) -> str:
+    if framework == "WordPress":
+        content = read_text_file(app_path / "wp-includes" / "version.php")
+        match = re.search(r"\$wp_version\s*=\s*['\"]([^'\"]+)['\"]", content)
+        return match.group(1) if match else ""
+
+    if framework == "CodeIgniter":
+        content = read_text_file(app_path / "system" / "core" / "CodeIgniter.php")
+        match = re.search(r"define\s*\(\s*['\"]CI_VERSION['\"]\s*,\s*['\"]([^'\"]+)", content)
+        return match.group(1) if match else ""
+
+    if framework == "Symfony":
+        for path in (
+            app_path / "lib" / "vendor" / "symfony" / "lib" / "autoload" / "sfCoreAutoload.class.php",
+            app_path / "lib" / "vendor" / "javer" / "symfony1" / "lib" / "autoload" / "sfCoreAutoload.class.php",
+        ):
+            content = read_text_file(path)
+            match = re.search(r"define\s*\(\s*['\"]SYMFONY_VERSION['\"]\s*,\s*['\"]([^'\"]+)", content)
+            if match:
+                return match.group(1)
+    return ""
+
+
 def detect_stack(app_dir: str) -> dict:
     app_path = Path(app_dir).resolve()
     if not app_path.is_dir():
@@ -307,7 +330,11 @@ def detect_stack(app_dir: str) -> dict:
     # PHP detection
     has_composer = "composer.json" in files_in_root
     has_artisan = "artisan" in files_in_root
-    has_php_files = any(f.endswith(".php") for f in files_in_root) or (app_path / "public" / "index.php").is_file()
+    has_php_files = (
+        any(f.endswith(".php") for f in files_in_root)
+        or (app_path / "public" / "index.php").is_file()
+        or (app_path / "web" / "index.php").is_file()
+    )
     
     # Node detection
     has_package_json = "package.json" in files_in_root
@@ -399,12 +426,39 @@ def detect_stack(app_dir: str) -> dict:
         elif (app_path / "system" / "core" / "CodeIgniter.php").is_file() or (app_path / "app" / "Config" / "App.php").is_file() or "spark" in files_in_root:
             stack["framework"] = "CodeIgniter"
             stack["entrypoint"] = "public/index.php" if (app_path / "public" / "index.php").is_file() else "index.php"
+        elif (
+            (app_path / "lib" / "vendor" / "symfony" / "lib" / "autoload" / "sfCoreAutoload.class.php").is_file()
+            or (app_path / "lib" / "vendor" / "javer" / "symfony1" / "lib" / "autoload" / "sfCoreAutoload.class.php").is_file()
+        ):
+            stack["framework"] = "Symfony"
+            stack["entrypoint"] = "web/index.php"
         elif (app_path / "bin" / "console").is_file() or "symfony/framework-bundle" in composer_data.get("require", {}):
             stack["framework"] = "Symfony"
             stack["entrypoint"] = "public/index.php"
         else:
             stack["framework"] = "Native PHP"
             stack["entrypoint"] = "public/index.php" if (app_path / "public" / "index.php").is_file() else "index.php"
+
+        framework = stack["framework"]
+        framework_version = _legacy_framework_version(app_path, framework)
+        if framework_version:
+            stack["framework_version"] = framework_version
+        is_legacy_native_php = (
+            framework == "Native PHP"
+            and (app_path / "lib" / "includes" / "path.php").is_file()
+            and (app_path / "system" / "back-end" / "main.php").is_file()
+        )
+        if (
+            stack["runtime_version_source"] == "detector_default"
+            and (framework_version or is_legacy_native_php)
+        ):
+            stack["runtime_version"] = "7.4"
+            stack["runtime_version_source"] = "legacy_compatibility"
+            stack["runtime_version_constraint"] = (
+                f"{framework} {framework_version}".strip()
+                if framework_version
+                else "legacy native PHP application"
+            )
 
     # B. NODE.JS STACK (jika bukan PHP atau Node merupakan primary)
     elif docker_language == "Node.js" or (

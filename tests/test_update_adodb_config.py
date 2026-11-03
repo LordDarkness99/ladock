@@ -7,6 +7,7 @@ from scripts.update_adodb_config import (
     update_adodb_mysqli_driver,
     update_legacy_app_registry,
     update_php_curly_offsets,
+    update_php4_constructors,
     update_pattemplate_constructor,
 )
 
@@ -109,6 +110,36 @@ def test_updates_legacy_php_curly_offsets_only_in_given_tree(tmp_path: Path):
     assert "$record['name'][1]" in php_file.read_text(encoding="utf-8")
     assert "$field{0}" in unrelated_file.read_text(encoding="utf-8")
     assert update_php_curly_offsets(template_dir) == []
+
+
+def test_modernizes_legacy_class_named_constructors(tmp_path: Path):
+    source_dir = tmp_path / "application"
+    source_dir.mkdir()
+    session_file = source_dir / "Session.php"
+    session_file.write_text(
+        "<?php\n"
+        "class CI_Session {\n"
+        "    function CI_Session() { $this->initialize(); }\n"
+        "    function other_method() {}\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    unrelated_file = source_dir / "Other.php"
+    unrelated_file.write_text(
+        "<?php\n"
+        "class Other {\n"
+        "    function not_a_constructor() {}\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    assert update_php4_constructors(source_dir) == [session_file]
+    updated = session_file.read_text(encoding="utf-8")
+    assert "function __construct() { $this->initialize(); }" in updated
+    assert "function CI_Session()" not in updated
+    assert "function other_method()" in updated
+    assert "function not_a_constructor()" in unrelated_file.read_text(encoding="utf-8")
+    assert update_php4_constructors(source_dir) == []
 
 
 def test_adds_php8_constructor_for_legacy_pattemplate(tmp_path: Path):

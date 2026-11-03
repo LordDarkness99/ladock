@@ -23,6 +23,11 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+try:
+    from .find_microservices import is_legacy_php_app, scan
+except ImportError:
+    from find_microservices import is_legacy_php_app, scan
+
 
 def log(msg):
     print(msg, file=sys.stderr)
@@ -114,6 +119,58 @@ def find_dir_named(root: str, name: str):
         if os.path.basename(dirpath) == name:
             return dirpath
     return None
+
+
+def find_cpanel_multi_app_plan(homedir: str):
+    """Find separate apps inside a cPanel webroot while retaining its root site."""
+    web_root = os.path.join(homedir, "public_html")
+    if not os.path.isdir(web_root):
+        web_root = os.path.join(homedir, "www")
+    if not os.path.isdir(web_root):
+        return None
+
+    sub_services = [
+        service
+        for service in scan(web_root)
+        if os.path.realpath(service["path"]) != os.path.realpath(web_root)
+    ]
+    if not sub_services or not is_legacy_php_app(web_root):
+        return None
+    if any(service["name"] == "root_web" for service in sub_services):
+        raise ValueError("Nama service 'root_web' sudah dipakai oleh aplikasi di webroot.")
+    return {"web_root": web_root, "sub_services": sub_services}
+
+
+def extract_cpanel_multi_apps(plan: dict, output_dir: str) -> None:
+    """Copy a cPanel root site and detected sub-apps into one clean service layout."""
+    web_root = plan["web_root"]
+    apps_dir = os.path.join(output_dir, "apps")
+    os.makedirs(apps_dir, exist_ok=True)
+
+    excluded_paths = {
+        os.path.realpath(service["path"])
+        for service in plan["sub_services"]
+    }
+
+    def exclude_sub_services(directory, names):
+        return [
+            name
+            for name in names
+            if os.path.realpath(os.path.join(directory, name)) in excluded_paths
+        ]
+
+    shutil.copytree(
+        web_root,
+        os.path.join(apps_dir, "root_web"),
+        symlinks=True,
+        ignore=exclude_sub_services,
+    )
+    for service in plan["sub_services"]:
+        shutil.copytree(
+            service["path"],
+            os.path.join(apps_dir, service["name"]),
+            symlinks=True,
+        )
 
 
 def find_laravel_root(search_dir: str):
@@ -299,9 +356,14 @@ def main():
     homedir = find_dir_named(tmp_dir, "homedir")
     is_cpanel = homedir is not None
 
+    cpanel_multi_app_plan = find_cpanel_multi_app_plan(homedir) if is_cpanel else None
     if is_cpanel:
         log("-> Terdeteksi arsip cPanel (memiliki 'homedir').")
-        app_root = find_laravel_root(homedir) or find_general_app_root(homedir)
+        app_root = (
+            cpanel_multi_app_plan["web_root"]
+            if cpanel_multi_app_plan
+            else find_laravel_root(homedir) or find_general_app_root(homedir)
+        )
     else:
         app_root = find_laravel_root(tmp_dir) or find_general_app_root(tmp_dir)
 
@@ -316,11 +378,18 @@ def main():
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(os.path.dirname(output_dir), exist_ok=True)
-    shutil.copytree(app_root, output_dir)
+    if cpanel_multi_app_plan:
+        extract_cpanel_multi_apps(cpanel_multi_app_plan, output_dir)
+        log(
+            f"-> {len(cpanel_multi_app_plan['sub_services']) + 1} aplikasi cPanel ditata di: "
+            f"{output_dir}/apps/"
+        )
+    else:
+        shutil.copytree(app_root, output_dir)
     log(f"-> Aplikasi disalin ke: {output_dir}")
 
     # Jika cPanel, gabungkan split public_html jika ada
-    if is_cpanel and homedir:
+    if is_cpanel and homedir and not cpanel_multi_app_plan:
         output_public = os.path.join(output_dir, "public")
         public_html = os.path.join(homedir, "public_html")
         if not os.path.isdir(public_html):
@@ -349,7 +418,8 @@ def main():
             fix_public_index_php(output_public)
 
     # Bersihkan cache Laravel jika ada
-    clean_laravel_cache(output_dir)
+    if not cpanel_multi_app_plan:
+        clean_laravel_cache(output_dir)
 
     # Temukan dump SQL
     dumps = find_db_dumps(tmp_dir)
@@ -362,9 +432,10 @@ def main():
             dest_sql = os.path.join(db_output_dir, "data.sql")
             shutil.copy2(primary_dump, dest_sql)
             log(f"-> Dump SQL utama disalin ke: {dest_sql}")
-            for extra_dump in dumps[1:]:
-                extra_dest = os.path.join(db_output_dir, os.path.basename(extra_dump))
-                shutil.copy2(extra_dump, extra_dest)
+            for dump_file in dumps:
+                named_dest = os.path.join(db_output_dir, os.path.basename(dump_file))
+                if os.path.realpath(named_dest) != os.path.realpath(dump_file):
+                    shutil.copy2(dump_file, named_dest)
         else:
             # Fallback: salin ke output_dir jika tidak ada db_output_dir spesifik
             for dump_f in dumps[:2]:

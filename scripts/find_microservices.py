@@ -102,7 +102,7 @@ def _is_symfony1_app(path: str) -> bool:
     )
 
 
-def _is_legacy_php_app(path: str) -> bool:
+def is_legacy_php_app(path: str) -> bool:
     """Deteksi aplikasi PHP native/legacy: ada index.php + minimal 1 sub-folder khas."""
     if not os.path.isfile(os.path.join(path, "index.php")):
         return False
@@ -114,6 +114,8 @@ def _is_legacy_php_app(path: str) -> bool:
 
 def _is_supported_app(path: str) -> bool:
     """Return whether a directory is an application rather than a dependency."""
+    if os.path.basename(path) == "root_web" and is_legacy_php_app(path):
+        return True
     if _is_wordpress_app(path):
         return True
     if _is_codeigniter_app(path):

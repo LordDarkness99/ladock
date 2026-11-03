@@ -20,6 +20,9 @@ PHP_CURLY_OFFSET_PATTERN = re.compile(
     r"(?P<value>\$[A-Za-z_][A-Za-z0-9_]*(?:(?:->)[A-Za-z_][A-Za-z0-9_]*|\[[^\]\r\n]+\])*)"
     r"\{(?P<offset>[^{}\r\n]+)\}"
 )
+PHP_CLASS_PATTERN = re.compile(
+    r"(?m)^[ \t]*(?:(?:abstract|final)\s+)?class\s+(?P<class_name>[A-Za-z_][A-Za-z0-9_]*)\b"
+)
 
 
 def php_string(value: str) -> str:
@@ -145,6 +148,38 @@ def update_php_curly_offsets(root: Path) -> list[Path]:
     return changed_paths
 
 
+def update_php4_constructors(root: Path) -> list[Path]:
+    changed_paths = []
+    if not root.is_dir():
+        return changed_paths
+    for php_path in root.rglob("*.php"):
+        source = php_path.read_text(encoding="utf-8", errors="replace")
+        class_matches = list(PHP_CLASS_PATTERN.finditer(source))
+        updated = source
+        for index in range(len(class_matches) - 1, -1, -1):
+            class_match = class_matches[index]
+            class_name = class_match.group("class_name")
+            end = class_matches[index + 1].start() if index + 1 < len(class_matches) else len(updated)
+            class_source = updated[class_match.start():end]
+            constructor = re.compile(
+                r"(?m)^(?P<prefix>[ \t]*(?:(?:public|protected|private|final)\s+)*function\s+(?:&\s*)?)"
+                + re.escape(class_name)
+                + r"(?P<suffix>\s*\()",
+                re.IGNORECASE,
+            )
+            updated_class, count = constructor.subn(
+                r"\g<prefix>__construct\g<suffix>",
+                class_source,
+                count=1,
+            )
+            if count:
+                updated = updated[:class_match.start()] + updated_class + updated[end:]
+        if updated != source:
+            php_path.write_text(updated, encoding="utf-8")
+            changed_paths.append(php_path)
+    return changed_paths
+
+
 def update_pattemplate_constructor(root: Path) -> list[Path]:
     changed_paths = []
     if not root.is_dir():
@@ -197,11 +232,18 @@ def main() -> None:
     parser.add_argument("--env", type=Path)
     parser.add_argument("--driver", action="append", default=[], type=Path)
     parser.add_argument("--php-root", action="append", default=[], type=Path)
+    parser.add_argument("--modernize-php4-constructor-root", action="append", default=[], type=Path)
     parser.add_argument("--registry", action="append", default=[], type=Path)
     args = parser.parse_args()
     if bool(args.config) != bool(args.env):
         parser.error("--config dan --env harus diberikan bersamaan.")
-    if not args.config and not args.driver and not args.php_root and not args.registry:
+    if (
+        not args.config
+        and not args.driver
+        and not args.php_root
+        and not args.modernize_php4_constructor_root
+        and not args.registry
+    ):
         parser.error("Berikan konfigurasi, driver, atau direktori PHP yang akan diperbarui.")
     if args.config and not args.config.is_file():
         parser.error(f"File konfigurasi tidak ditemukan: {args.config}")
@@ -220,12 +262,16 @@ def main() -> None:
         for php_root in args.php_root:
             changed_php_paths.extend(update_php_curly_offsets(php_root))
             changed_php_paths.extend(update_pattemplate_constructor(php_root))
+        constructor_paths = []
+        for php_root in args.modernize_php4_constructor_root:
+            constructor_paths.extend(update_php4_constructors(php_root))
+        changed_php_paths.extend(constructor_paths)
         changed = bool(changed_php_paths) or changed
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     if changed_php_paths:
         for php_path in changed_php_paths:
-            print(f"Sintaks offset PHP 8 diperbarui: {php_path}")
+            print(f"Kompatibilitas PHP diperbarui: {php_path}")
     if changed:
         print("Kompatibilitas ADOdb/PHP diperbarui.")
     else:

@@ -8,19 +8,20 @@ Otomasi modern untuk men-deploy aplikasi web dan hasil migrasi cPanel ke Docker 
 
 1. **Dukungan Ekstraksi Arsip Universal**:
    - Ekstraksi otomatis arsip **`.zip`**, **`.tar.gz`**, **`.tgz`**, dan **`cpmove`**.
+   - Backup cPanel multi-aplikasi ditata menjadi service terpisah; aplikasi root web dan dump SQL bernama tetap dipertahankan.
    - Validasi integritas berkas (corrupt check).
    - Pencegahan kerentanan keamanan **Path Traversal / Zip-Slip** (`../`).
 2. **Deteksi Stack & Dependensi Komprehensif (`stack.json`)**:
    - Bahasa/Runtime: PHP, Node.js, Python, Go, Ruby, Java.
    - Framework: Laravel, CodeIgniter, Symfony, WordPress, Express, Next.js, Django, Flask, dll.
    - Package manager: Composer, npm, yarn, pnpm, pip, poetry, bundler, go modules.
-   - Versi runtime dicari dari file versi proyek (`.php-version`, `.nvmrc`, `.python-version`, `.go-version`, `.ruby-version`, `.java-version`, `.tool-versions`) lalu manifest; `stack.json` mencatat versi, sumber, dan constraint yang terdeteksi.
+   - Versi runtime didahulukan dari base image yang dikenali di `Dockerfile`, lalu file versi proyek (`.php-version`, `.nvmrc`, `.python-version`, `.go-version`, `.ruby-version`, `.java-version`, `.tool-versions`), lalu manifest; `stack.json` mencatat versi, sumber, dan constraint yang terdeteksi.
    - Kebutuhan ekstensi PHP, web server, dan jenis database juga tersimpan di `stack.json`.
-   - Build monolith dan microservice otomatis mengikuti runtime/versi yang dideteksi: PHP, Node.js, Python, Go, Ruby, atau Java. Runtime dan versi boleh berbeda di setiap service.
+   - Runtime untuk build otomatis: PHP (default 8.2), Node.js (20), Python (3.11), Go (1.22), Ruby (3.3), dan Java (21). Runtime dan versi boleh berbeda di setiap service. Untuk PHP legacy yang terdeteksi tanpa versi eksplisit, fallback kompatibilitasnya PHP 7.4; marker versi proyek tetap diutamakan.
    - Deteksi microservice mengenali instalasi WordPress sebagai satu aplikasi; plugin dan library di `wp-content`/`wp-includes` tidak dibangun sebagai service terpisah.
    - Jika proyek menyediakan `Dockerfile`, LaDock menggunakannya; jika tidak, LaDock membuat Dockerfile runtime yang sesuai. Port container standar dapat diubah lewat `LADOCK_CONTAINER_PORT` atau `PORT` pada `.env`.
    - Versi didahulukan dari file versi proyek, kemudian manifest; jika tidak tersedia, detector memakai default runtime yang tercatat sebagai `detector_default` di `stack.json`.
-   - Build otomatis memakai entrypoint konvensional (`scripts.start` untuk Node, Django/Flask/FastAPI atau `main.py` untuk Python, `go build` dari root, Rails/Rack untuk Ruby, serta Spring Boot via Maven/Gradle wrapper). Struktur atau entrypoint khusus sebaiknya menyediakan Dockerfile sendiri.
+   - Build otomatis memakai entrypoint konvensional (`scripts.start` untuk Node, Django/Flask/FastAPI atau `main.py` untuk Python, `go build` dari root, Rails/Rack untuk Ruby, serta Spring Boot via Maven/Gradle wrapper). Ini bukan jaminan semua versi/struktur kompatibel: versi image harus tersedia dan dependency aplikasi harus cocok. Struktur atau entrypoint khusus, serta bahasa/runtime di luar daftar build otomatis, perlu menyediakan Dockerfile sendiri.
 3. **Restrukturisasi Folder Hasil Deployment yang Bersih**:
    - Tidak lagi mengotori folder dengan berkas hidden `.docker/` atau `.docker-compose-app.yml`.
    - Kode aplikasi hasil deployment tersimpan lokal di `docker/apps/<app_name>/src/`.
@@ -140,9 +141,11 @@ Saat deploy, kredensial database dibaca hanya dari file `.env` service (`DB_DATA
 
 Deploy ditolak jika nama project yang sama sudah terdaftar dari file Compose deployment atau container Docker (termasuk container yang sedang berhenti). Proses deploy yang berjalan bersamaan untuk project yang sama juga dikunci dan ditolak, termasuk dari Deploy Hub. Untuk memperbarui deployment yang ada secara sengaja, berikan folder deployment yang sama dengan opsi `--replace-existing`. Opsi ini tidak dapat digunakan untuk menimpa folder tujuan ekstraksi arsip.
 
-Untuk aplikasi PHP lama yang memakai konfigurasi ADOdb `mysql`, deploy mengalihkan konfigurasi `lib/includes/database.php` ke driver `mysqli` dan kredensial dari `.env`. Compat helper juga memperbarui signature driver ADOdb lama, menangani hasil query non-recordset dengan aman, mengubah sintaks akses offset kurung kurawal, dan mengaktifkan constructor bernama `__construct` yang dibutuhkan PHP 8 pada library patTemplate. Image PHP menyertakan ekstensi `mysqli` dan `pdo_mysql`. Source aplikasi dipasang sebagai bind mount oleh Compose, jadi image tidak menyalin seluruh source saat build; ini mengurangi ukuran build context dan waktu build.
+Untuk aplikasi PHP lama yang memakai konfigurasi ADOdb `mysql`, deploy mengalihkan konfigurasi `lib/includes/database.php` ke driver `mysqli` dan kredensial dari `.env`. Compat helper juga memperbarui signature driver ADOdb lama, menangani hasil query non-recordset dengan aman, mengubah sintaks akses offset kurung kurawal pada library legacy (termasuk dependency Symfony 1), dan mengaktifkan constructor bernama `__construct` yang dibutuhkan PHP 8 pada library patTemplate. Image PHP menyertakan ekstensi `mysqli` dan `pdo_mysql`. Source aplikasi dipasang sebagai bind mount oleh Compose, jadi image tidak menyalin seluruh source saat build; ini mengurangi ukuran build context dan waktu build.
 
 Untuk WordPress yang dijalankan di belakang gateway berbasis path, deploy menyelaraskan kredensial DB serta `WP_HOME`/`WP_SITEURL` dengan environment service. Karena gateway menghapus prefix route sebelum meneruskan request, konfigurasi WordPress dan aturan `.htaccess` disesuaikan agar homepage dan permalink tetap cocok dengan URL gateway. Pemeriksaan query kosong pada WordPress lama juga dinormalisasi agar tetap kompatibel dengan perbandingan PHP 8.
+
+Untuk backup cPanel yang berisi aplikasi di `public_html/` dan beberapa aplikasi di subfolder, LaDock menempatkan aplikasi root sebagai service `root_web` dan setiap sub-aplikasi terdeteksi sebagai service sendiri. `root_web` menggunakan route gateway `/admin/`; port akses langsung service dialokasikan berurutan. Dump SQL disimpan dengan nama database asal dan diimpor ke schema service yang sesuai. Konfigurasi database CodeIgniter dan Symfony 1 juga diselaraskan dengan kredensial service. Untuk CodeIgniter lama, constructor PHP 4 bernama sama dengan class dimodernisasi agar PHP 7.4 tidak menampilkan deprecation dan memutus session/header. Untuk deployment lokal, aturan secure-only Symfony 1 di salinan service diubah agar HTTP dapat digunakan; production tetap harus menyediakan terminasi TLS. Gateway hanya meneruskan route aplikasi dan tidak membuat halaman daftar service.
 
 ### 2. Menghentikan & Membersihkan Container
 
