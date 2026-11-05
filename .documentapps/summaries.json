@@ -6,7 +6,7 @@
     "summary": "Konfigurasi utama LaDock untuk root deployment, MySQL sentral pada port host 3310, port default aplikasi, batas memori default per service, serta lokasi template, skrip, log, dan dump database."
   },
   "README.md": {
-    "summary": "Dokumentasi LaDock v3.0 tentang deployment runtime multi-bahasa dan versi per service, Dockerfile proyek, auto-port, batas memori, database sentral, dashboard, dan backup/restore."
+    "summary": "Dokumentasi LaDock v3.0 tentang deployment runtime multi-bahasa, pemisahan aplikasi dari backup cPanel multi-aplikasi, versi per service, Dockerfile proyek, auto-port, batas memori, database sentral, dashboard, dan backup/restore."
   },
   "central_db.sh": {
     "summary": "Skrip pengelola MySQL sentral yang menyiapkan network/container, memigrasikan data ke bind mount lokal, membersihkan symlink socket stale sebelum/sesudah startup dan saat stop, menangani container restarting, serta menunggu kesiapan database."
@@ -57,7 +57,7 @@
     "summary": "Penanda package Python untuk memungkinkan modul di direktori scripts diimpor sebagai package."
   },
   "scripts/extract_archive.py": {
-    "summary": "Ekstraktor arsip universal (.zip, .tar.gz, .tgz) dengan validasi integritas/corrupt, proteksi path traversal (Zip-Slip), dan penataan struktur aplikasi cPanel maupun project umum."
+    "summary": "Ekstraktor arsip ZIP/TAR.GZ/TGZ dan backup cPanel multi-aplikasi dengan validasi integritas, proteksi Zip-Slip, pemisahan aplikasi root/nested, serta preservasi dump SQL bernama."
   },
   "scripts/extract_cpmove.py": {
     "summary": "Ekstraktor arsip backup cPanel tar.gz cpmove untuk menyatukan source Laravel dan public_html."
@@ -67,6 +67,9 @@
   },
   "scripts/find_microservices.py": {
     "summary": "Memindai sub-project PHP, Node.js, Python, Go, Ruby, dan Java untuk deployment microservices; mengenali instalasi WordPress sebagai satu aplikasi agar plugin/library tidak menjadi service terpisah."
+  },
+  "scripts/legacy_db_config.py": {
+    "summary": "Mendeteksi nama database aplikasi PHP legacy dan memigrasikan konfigurasi CodeIgniter serta Symfony 1 ke environment deployment; juga menyesuaikan URL/security lokal dan membersihkan cache Symfony setelah perubahan."
   },
   "scripts/generate_compose.py": {
     "summary": "Membangun Compose microservices sesuai metadata runtime dan port container tiap service, memuat .env, menggunakan network DB sentral, dan menerapkan batas memori."
@@ -119,6 +122,9 @@
   "tests/test_archive.py": {
     "summary": "Unit test untuk ekstraksi arsip ZIP, validasi corrupt, dan pencegahan kerentanan Zip-Slip path traversal."
   },
+  "tests/test_cpanel_multi_app.py": {
+    "summary": "Tes pemisahan aplikasi root dan nested dari backup cPanel, serta ekstraksi semua aplikasi dan dump database bernama."
+  },
   "tests/test_stack_detection.py": {
     "summary": "Unit test untuk pendeteksian stack PHP Laravel, Node.js Express, Python Django, dan Go."
   },
@@ -154,6 +160,9 @@
   },
   "tests/test_update_adodb_config.py": {
     "summary": "Tes migrasi konfigurasi ADOdb ke mysqli, pembaruan signature driver legacy, dan validasi nilai koneksi database."
+  },
+  "tests/test_legacy_db_config.py": {
+    "summary": "Tes migrasi konfigurasi database CodeIgniter dan Symfony 1, penyesuaian security lokal, serta pembersihan cache Symfony."
   },
   "tests/test_dockerfile_template.py": {
     "summary": "Tes image PHP menyertakan mysqli dan memakai bind mount Compose untuk source tanpa menyalin source besar ke image."
