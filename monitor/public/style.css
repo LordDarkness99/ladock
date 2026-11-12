@@ -1045,6 +1045,7 @@ body {
 
 .form-group input[type="text"],
 .form-group input[type="number"],
+.form-group textarea,
 .form-group select {
   width: 100%;
   padding: 0.65rem 0.85rem;
@@ -1056,7 +1057,11 @@ body {
   color: var(--text-main);
 }
 
-.form-group input:focus, .form-group select:focus {
+.form-group textarea {
+  resize: vertical;
+}
+
+.form-group input:focus, .form-group textarea:focus, .form-group select:focus {
   outline: none;
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);

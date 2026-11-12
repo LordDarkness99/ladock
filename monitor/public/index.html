@@ -187,22 +187,24 @@
                   <line x1="12" y1="3" x2="12" y2="15"></line>
                 </svg>
                 <div class="dropzone-text">
-                  <strong>Klik untuk upload</strong> arsip <code>.zip</code>, <code>.tar.gz</code>, atau <code>cpmove</code>
+                  <strong>Klik untuk upload satu atau beberapa</strong> arsip <code>.zip</code>, <code>.tar.gz</code>, atau <code>cpmove</code>
                 </div>
                 <div class="dropzone-sub" id="upload-status-text">Proteksi Zip-Slip & Corrupt Check diaktifkan</div>
-                <input type="file" id="archive-file-input" style="display: none;" accept=".zip,.tar.gz,.tgz,.tar" onchange="handleFileUpload(event)">
+                <input type="file" id="archive-file-input" style="display: none;" accept=".zip,.tar.gz,.tgz,.tar" multiple onchange="handleFileUpload(event)">
               </div>
 
               <div class="form-group">
-                <label>File Arsip yang Diupload (Path di Server):</label>
-                <input type="text" id="deploy-archive-path" placeholder="/path/ke/archive.zip">
+                <label>Arsip yang Diupload (satu path per baris):</label>
+                <textarea id="deploy-archive-path" rows="3" placeholder="/path/ke/archive-satu.zip&#10;/path/ke/archive-dua.tar.gz"></textarea>
+                <small>Semua arsip di daftar ini akan di-deploy berurutan.</small>
               </div>
 
               <div class="form-divider"><span>ATAU</span></div>
 
               <div class="form-group">
-                <label>Path Folder Project Lokal:</label>
-                <input type="text" id="deploy-project-path" placeholder="/home/nizar/Documents/.../app-folder">
+                <label>Path Folder Project Lokal (satu path per baris):</label>
+                <textarea id="deploy-project-path" rows="4" placeholder="/home/nizar/Documents/.../app-folder&#10;/home/nizar/Documents/.../app-lainnya"></textarea>
+                <small>Beberapa folder akan di-deploy berurutan dengan opsi yang sama.</small>
               </div>
 
               <div class="form-row">
@@ -240,6 +242,7 @@
                 <div class="form-group checkbox-group">
                   <label><input type="checkbox" id="deploy-force-import"> Paksa Import SQL Dump</label>
                   <label><input type="checkbox" id="deploy-skip-import"> Lewati Import SQL</label>
+                  <label><input type="checkbox" id="deploy-replace-existing"> Ganti deployment arsip yang sudah ada (backup dulu)</label>
                 </div>
               </div>
 

@@ -8,6 +8,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { spawn, execSync, execFileSync } = require('child_process');
 const url = require('url');
 
@@ -247,9 +248,9 @@ function parseMultipart(req, uploadDir) {
           if (fnMatch) {
             const rawFilename = fnMatch[1];
             const safeFilename = path.basename(rawFilename).replace(/[^a-zA-Z0-9_\.-]/g, '_');
-            const destPath = path.join(uploadDir, safeFilename);
+            const destPath = path.join(uploadDir, `${crypto.randomBytes(8).toString('hex')}_${safeFilename}`);
             fs.writeFileSync(destPath, fileBody);
-            return resolve({ filename: safeFilename, path: destPath, size: fileBody.length });
+            return resolve({ filename: path.basename(destPath), path: destPath, size: fileBody.length });
           }
         }
         startIdx = nextIdx;
@@ -371,6 +372,14 @@ const server = http.createServer(async (req, res) => {
           sendError(res, 'Batas memori tidak valid. Gunakan ukuran seperti 512M atau 1G.', 400);
           return;
         }
+        if (params.replace_existing !== undefined && typeof params.replace_existing !== 'boolean') {
+          sendError(res, 'Opsi penggantian deployment tidak valid.', 400);
+          return;
+        }
+        if (params.replace_existing && !params.archive) {
+          sendError(res, 'Backup dan penggantian deployment hanya tersedia untuk arsip.', 400);
+          return;
+        }
         const deployId = 'deploy_' + Date.now();
         const logPath = path.join(LOGS_DIR, `${deployId}.log`);
 
@@ -384,6 +393,7 @@ const server = http.createServer(async (req, res) => {
 
         if (params.force_import) cmdArgs.push('--force-import');
         if (params.skip_import) cmdArgs.push('--skip-import');
+        if (params.replace_existing) cmdArgs.push('--replace-existing');
         if (params.mode) cmdArgs.push(`--mode=${params.mode}`);
         if (params.memory_limit) cmdArgs.push(`--memory-limit=${params.memory_limit}`);
 
@@ -415,11 +425,13 @@ const server = http.createServer(async (req, res) => {
         });
 
         proc.on('close', code => {
+          const completionMessage = `\n[SELESAI] Exit code: ${code}\n`;
+          logStream.write(completionMessage);
           logStream.end();
           historyItem.status = code === 0 ? 'success' : 'failed';
           historyItem.finished_at = new Date().toISOString();
           const listeners = activeStreams.get(deployId)?.listeners || [];
-          listeners.forEach(fn => fn(`\n[SELESAI] Exit code: ${code}\n[STREAM_END]`));
+          listeners.forEach(fn => fn(`${completionMessage}[STREAM_END]`));
           activeStreams.delete(deployId);
         });
 

@@ -183,32 +183,49 @@ async function containerAction(name, action) {
 
 // 2. Deploy Hub
 async function handleFileUpload(event) {
-  const file = event.target.files[0];
-  if (!file) return;
+  const files = Array.from(event.target.files || []);
+  if (!files.length) return;
+  event.target.value = '';
 
   const statusText = document.getElementById('upload-status-text');
-  statusText.innerText = `Mengupload ${file.name}...`;
+  const uploadedFiles = [];
+  const uploadErrors = [];
 
-  const formData = new FormData();
-  formData.append('archive', file);
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
+    statusText.innerText = `Mengupload ${index + 1}/${files.length}: ${file.name}...`;
+    const formData = new FormData();
+    formData.append('archive', file);
 
-  try {
-    const res = await apiFetch('/api/upload', {
-      method: 'POST',
-      body: formData
-    });
-    const data = await res.json();
-    if (data.success) {
-      document.getElementById('deploy-archive-path').value = data.file.path;
-      statusText.innerText = `✓ Terupload: ${data.file.filename} (${(data.file.size / 1024 / 1024).toFixed(2)} MB)`;
-      showToast('Arsip berhasil diupload ke server!', 'success');
-    } else {
-      statusText.innerText = `❌ Upload gagal: ${data.error}`;
-      showToast(data.error, 'error');
+    try {
+      const res = await apiFetch('/api/upload', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.file?.path) {
+        throw new Error(data.error || `Upload gagal (HTTP ${res.status}).`);
+      }
+      uploadedFiles.push(data.file);
+    } catch (error) {
+      uploadErrors.push(`${file.name}: ${error.message}`);
     }
-  } catch (err) {
-    statusText.innerText = `❌ Error: ${err.message}`;
-    showToast(err.message, 'error');
+  }
+
+  const archivePathField = document.getElementById('deploy-archive-path');
+  const existingPaths = archivePathField.value.split(/\r?\n/).map(path => path.trim()).filter(Boolean);
+  archivePathField.value = [...existingPaths, ...uploadedFiles.map(file => file.path)].join('\n');
+
+  const uploadedNames = uploadedFiles.map(file =>
+    `${file.filename} (${(file.size / 1024 / 1024).toFixed(2)} MB)`
+  );
+  statusText.innerText = uploadedFiles.length
+    ? `✓ Terupload: ${uploadedNames.join(', ')}${uploadErrors.length ? `\n❌ Gagal: ${uploadErrors.join('; ')}` : ''}`
+    : `❌ Upload gagal: ${uploadErrors.join('; ')}`;
+  if (uploadErrors.length) {
+    showToast(`${uploadedFiles.length} arsip berhasil diupload, ${uploadErrors.length} gagal.`, 'error');
+  } else {
+    showToast(`${uploadedFiles.length} arsip berhasil diupload ke server!`, 'success');
   }
 }
 
@@ -242,8 +259,14 @@ async function checkDeployPort() {
 
 async function handleDeploySubmit(event) {
   event.preventDefault();
-  const archivePath = document.getElementById('deploy-archive-path').value.trim();
-  const projectPath = document.getElementById('deploy-project-path').value.trim();
+  const archivePaths = document.getElementById('deploy-archive-path').value
+    .split(/\r?\n/)
+    .map(archivePath => archivePath.trim())
+    .filter(Boolean);
+  const projectPaths = document.getElementById('deploy-project-path').value
+    .split(/\r?\n/)
+    .map(projectPath => projectPath.trim())
+    .filter(Boolean);
   const httpPort = document.getElementById('deploy-http-port').value.trim();
   const dbPort = document.getElementById('deploy-db-port').value.trim();
   const phpVer = document.getElementById('deploy-php-ver').value.trim();
@@ -251,66 +274,111 @@ async function handleDeploySubmit(event) {
   const memoryLimit = document.getElementById('deploy-memory-limit').value.trim();
   const forceImport = document.getElementById('deploy-force-import').checked;
   const skipImport = document.getElementById('deploy-skip-import').checked;
+  const replaceExisting = document.getElementById('deploy-replace-existing').checked;
 
-  if (!archivePath && !projectPath) {
+  if (archivePaths.length && projectPaths.length) {
+    showToast('Gunakan path arsip atau path folder, jangan keduanya sekaligus.', 'error');
+    return;
+  }
+
+  if (replaceExisting && !archivePaths.length) {
+    showToast('Opsi backup dan penggantian hanya tersedia untuk deploy arsip.', 'error');
+    return;
+  }
+
+  if (!archivePaths.length && !projectPaths.length) {
     showToast('Harap masukkan path folder atau upload arsip!', 'error');
     return;
   }
 
-  const payload = {
-    archive: archivePath || undefined,
-    path: projectPath || undefined,
+  const deployJobs = archivePaths.length
+    ? archivePaths.map(archive => ({ archive }))
+    : projectPaths.map(path => ({ path }));
+  const options = {
     http_port: httpPort || 'auto',
     db_port: dbPort,
     php_version: phpVer || undefined,
     mode: mode || undefined,
     memory_limit: memoryLimit || undefined,
     force_import: forceImport,
-    skip_import: skipImport
+    skip_import: skipImport,
+    replace_existing: replaceExisting
   };
 
   const term = document.getElementById('deploy-live-terminal');
-  term.innerText = `[${new Date().toLocaleTimeString()}] Memulai deployment...\n`;
+  term.innerText = `[${new Date().toLocaleTimeString()}] Memulai ${deployJobs.length} deployment secara berurutan...\n`;
   document.getElementById('btn-submit-deploy').disabled = true;
+  showToast(`Memulai antrean ${deployJobs.length} deployment...`, 'info');
 
-  try {
-    const res = await apiFetch('/api/deploy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
+  let failures = 0;
+  for (let index = 0; index < deployJobs.length; index += 1) {
+    const job = deployJobs[index];
+    const target = job.path || job.archive;
+    term.innerText += `\n[${index + 1}/${deployJobs.length}] Deploy: ${target}\n`;
+    term.scrollTop = term.scrollHeight;
 
-    if (data.success && data.deploy_id) {
-      showToast('Proses deploy dimulai, streaming log realtime...', 'info');
-      startDeployStream(data.deploy_id);
-    } else {
-      term.innerText += `❌ Gagal memulai deploy: ${data.error}\n`;
-      document.getElementById('btn-submit-deploy').disabled = false;
-      showToast(data.error, 'error');
+    try {
+      const res = await apiFetch('/api/deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...options, ...job })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.deploy_id) {
+        throw new Error(data.error || `Permintaan deploy gagal (HTTP ${res.status}).`);
+      }
+
+      const succeeded = await new Promise(resolve => startDeployStream(data.deploy_id, resolve));
+      if (!succeeded) failures += 1;
+    } catch (error) {
+      failures += 1;
+      term.innerText += `❌ Gagal deploy ${target}: ${error.message}\n`;
+      term.scrollTop = term.scrollHeight;
     }
-  } catch (e) {
-    term.innerText += `❌ Error: ${e.message}\n`;
-    document.getElementById('btn-submit-deploy').disabled = false;
   }
+
+  document.getElementById('btn-submit-deploy').disabled = false;
+  const succeeded = deployJobs.length - failures;
+  term.innerText += `\nAntrean selesai: ${succeeded} berhasil, ${failures} gagal.\n`;
+  showToast(`Antrean selesai: ${succeeded} berhasil, ${failures} gagal.`, failures ? 'error' : 'success');
+  fetchStatus();
+  loadDeployedApps();
 }
 
-function startDeployStream(deployId) {
+function startDeployStream(deployId, onComplete = null) {
   if (activeDeployEventSource) activeDeployEventSource.close();
 
   const term = document.getElementById('deploy-live-terminal');
-  activeDeployEventSource = new EventSource(`/api/deploy/stream?deployId=${deployId}`);
+  const eventSource = new EventSource(`/api/deploy/stream?deployId=${encodeURIComponent(deployId)}`);
+  activeDeployEventSource = eventSource;
+  let completed = false;
+  let exitCode = null;
 
-  activeDeployEventSource.onmessage = (event) => {
+  const finish = (succeeded) => {
+    if (completed) return;
+    completed = true;
+    eventSource.close();
+    if (activeDeployEventSource === eventSource) activeDeployEventSource = null;
+
+    if (onComplete) {
+      onComplete(succeeded);
+    } else {
+      document.getElementById('btn-submit-deploy').disabled = false;
+      showToast(succeeded ? 'Deployment selesai!' : 'Deployment gagal.', succeeded ? 'success' : 'error');
+      fetchStatus();
+      loadDeployedApps();
+    }
+  };
+
+  eventSource.onmessage = (event) => {
     try {
       const parsed = JSON.parse(event.data);
       if (parsed.message) {
+        const exitCodeMatch = parsed.message.match(/\[SELESAI\] Exit code: (-?\d+)/);
+        if (exitCodeMatch) exitCode = Number(exitCodeMatch[1]);
+
         if (parsed.message.includes('[STREAM_END]')) {
-          activeDeployEventSource.close();
-          document.getElementById('btn-submit-deploy').disabled = false;
-          showToast('Deployment selesai!', 'success');
-          fetchStatus();
-          loadDeployedApps();
+          finish(exitCode === 0);
         } else {
           term.innerText += parsed.message;
           term.scrollTop = term.scrollHeight;
@@ -321,9 +389,9 @@ function startDeployStream(deployId) {
     }
   };
 
-  activeDeployEventSource.onerror = () => {
-    activeDeployEventSource.close();
-    document.getElementById('btn-submit-deploy').disabled = false;
+  eventSource.onerror = () => {
+    term.innerText += `❌ Koneksi streaming deploy ${deployId} terputus.\n`;
+    finish(false);
   };
 }
 

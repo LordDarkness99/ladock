@@ -134,7 +134,7 @@ Flags:
   --max-depth=N      Kedalaman scan microservice (default: 5)
   --base-app-port=N  Port awal direct-access service microservice
   --memory-limit=SIZE Batas memori untuk setiap service (default: $DEFAULT_MEMORY_LIMIT; contoh: 1G)
-  --replace-existing Deploy ulang dengan source path yang sama ke deployment yang sudah ada
+  --replace-existing Ganti deployment yang ada; untuk arsip, backup dibuat terlebih dahulu
 
 Nama project yang sudah pernah di-deploy ditolak untuk mencegah deployment duplikat.
 Deploy bersamaan dengan nama project yang sama juga ditolak.
@@ -170,6 +170,88 @@ report_skipped_ports() {
   local skipped
   skipped="$(python3 -c 'import json, sys; print(", ".join(map(str, json.load(sys.stdin)["skipped"])))')"
   [[ -z "$skipped" ]] || info "Port terpakai/dikecualikan dan dilewati: $skipped"
+}
+
+ARCHIVE_BACKUP_ROOT=""
+
+backup_archive_deployment() {
+  local slug="$1" app_dir="$2" db_dir="$3" env_file db_name
+  local -A seen_databases=()
+  local -a env_files=(
+    "$app_dir/.env"
+    "$app_dir/src/.env"
+    "$app_dir/.credentials.env"
+    "$app_dir/apps"/*/.env
+    "$app_dir/apps"/*/src/.env
+    "$app_dir/apps"/*/.credentials.env
+  )
+
+  mkdir -p "$SCRIPT_DIR/docker/backups/deployments"
+  ARCHIVE_BACKUP_ROOT="$(mktemp -d "$SCRIPT_DIR/docker/backups/deployments/${slug}_$(date +%Y%m%d_%H%M%S)_XXXXXX")"
+  log "Membuat backup deployment lama di: $ARCHIVE_BACKUP_ROOT"
+
+  for env_file in "${env_files[@]}"; do
+    [[ -f "$env_file" ]] || continue
+    if [[ "$env_file" == *".credentials.env" ]]; then
+      db_name="$(read_env_value "$env_file" DB_NAME)"
+    else
+      db_name="$(read_env_value "$env_file" DB_DATABASE)"
+    fi
+    [[ -n "$db_name" ]] || continue
+    if [[ ! "$db_name" =~ ^[A-Za-z0-9_]+$ ]]; then
+      echo "❌ Nama database lama tidak valid; backup dan penggantian dibatalkan." >&2
+      return 1
+    fi
+    [[ -n "${seen_databases[$db_name]:-}" ]] && continue
+    seen_databases["$db_name"]=1
+    "$SCRIPTS_DIR/db_dump.sh" "$slug" "$db_name" "$ARCHIVE_BACKUP_ROOT/live-databases/$db_name"
+  done
+
+  if [[ ${#seen_databases[@]} -eq 0 ]]; then
+    info "Nama database tidak ditemukan; dump SQL lokal tetap akan diamankan."
+  fi
+
+  bash "$SCRIPT_DIR/destroy.sh" "$app_dir"
+
+  if [[ -e "$app_dir" ]] && ! mv "$app_dir" "$ARCHIVE_BACKUP_ROOT/app"; then
+    echo "❌ Gagal memindahkan deployment lama ke folder backup." >&2
+    return 1
+  fi
+  if [[ -e "$db_dir" ]] && ! mv "$db_dir" "$ARCHIVE_BACKUP_ROOT/local-database-dumps"; then
+    if [[ -e "$ARCHIVE_BACKUP_ROOT/app" ]]; then
+      mv "$ARCHIVE_BACKUP_ROOT/app" "$app_dir"
+    fi
+    echo "❌ Gagal memindahkan dump SQL lama; deployment lama dipulihkan." >&2
+    return 1
+  fi
+  if [[ ${#seen_databases[@]} -eq 0 ]]; then
+    info "Backup source dan dump SQL lokal selesai."
+  else
+    info "Backup source, dump SQL lokal, dan database aktif selesai."
+  fi
+}
+
+restore_archive_backup() {
+  local app_dir="$1" db_dir="$2" slug="$3"
+  [[ -n "$ARCHIVE_BACKUP_ROOT" ]] || return 0
+
+  if [[ -e "$app_dir" ]]; then
+    mv "$app_dir" "$ARCHIVE_BACKUP_ROOT/failed-extraction"
+  fi
+  if [[ -e "$db_dir" ]]; then
+    mv "$db_dir" "$ARCHIVE_BACKUP_ROOT/failed-local-database-dumps"
+  fi
+  if [[ -e "$ARCHIVE_BACKUP_ROOT/app" ]]; then
+    mv "$ARCHIVE_BACKUP_ROOT/app" "$app_dir"
+  fi
+  if [[ -e "$ARCHIVE_BACKUP_ROOT/local-database-dumps" ]]; then
+    mv "$ARCHIVE_BACKUP_ROOT/local-database-dumps" "$db_dir"
+  fi
+  if [[ -f "$app_dir/docker-compose.yml" ]] &&
+      ! (cd "$app_dir" && $DC -f docker-compose.yml -p "${slug}_app_stack" up -d); then
+    echo "⚠️  Source lama sudah dipulihkan, tetapi container gagal dijalankan kembali." >&2
+  fi
+  echo "⚠️  Ekstraksi gagal; source deployment lama dipulihkan dari $ARCHIVE_BACKUP_ROOT." >&2
 }
 
 acquire_project_lock() {
@@ -218,7 +300,7 @@ check_duplicate_deploy() {
   fi
   deployed="$(python3 -c 'import json, sys; print(str(json.load(sys.stdin)["deployed"]).lower())' <<<"$guard_result")"
   if [[ "$deployed" == "true" ]]; then
-    echo "❌ Project '$slug' sudah pernah di-deploy. Deployment duplikat dibatalkan; hapus deployment lama terlebih dahulu sebelum mencoba lagi." >&2
+    echo "❌ Project '$slug' sudah pernah di-deploy. Gunakan --replace-existing jika memang ingin menggantinya; deployment arsip akan di-backup terlebih dahulu." >&2
     return 1
   fi
 }
@@ -276,17 +358,27 @@ if [[ -n "$ARCHIVE_FILE" ]]; then
   RAW_EXTRACT_APP="$(basename "$ARCHIVE_DEST")"
   CLEAN_EXTRACT_APP="$(echo "$RAW_EXTRACT_APP" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g' | sed -E 's/^_+|_+$//g')"
   check_duplicate_deploy "$CLEAN_EXTRACT_APP"
-  if [[ -e "$ARCHIVE_DEST" ]]; then
+  CENTRAL_DB_DIR="$SCRIPT_DIR/mysql/db/$CLEAN_EXTRACT_APP"
+  if [[ "$REPLACE_EXISTING" -eq 1 ]]; then
+    backup_archive_deployment "$CLEAN_EXTRACT_APP" "$ARCHIVE_DEST" "$CENTRAL_DB_DIR"
+  elif [[ -e "$ARCHIVE_DEST" ]]; then
     echo "❌ Folder tujuan arsip sudah ada: $ARCHIVE_DEST. Pilih tujuan baru agar data tidak tertimpa." >&2
     exit 1
   fi
-  CENTRAL_DB_DIR="$SCRIPT_DIR/mysql/db/$CLEAN_EXTRACT_APP"
   mkdir -p "$CENTRAL_DB_DIR"
 
   log "Mengekstrak dan memvalidasi arsip ($ARCHIVE_FILE)..."
-  PROJECT_PATH="$(python3 "$SCRIPTS_DIR/extract_archive.py" "$ARCHIVE_FILE" "$ARCHIVE_DEST" "$CENTRAL_DB_DIR")"
+  if ! PROJECT_PATH="$(python3 "$SCRIPTS_DIR/extract_archive.py" "$ARCHIVE_FILE" "$ARCHIVE_DEST" "$CENTRAL_DB_DIR")"; then
+    restore_archive_backup "$ARCHIVE_DEST" "$CENTRAL_DB_DIR" "$CLEAN_EXTRACT_APP"
+    echo "❌ Gagal mengekstrak arsip." >&2
+    exit 1
+  fi
 
-  [[ -z "$PROJECT_PATH" || ! -d "$PROJECT_PATH" ]] && echo "❌ Gagal mengekstrak arsip." && exit 1
+  if [[ -z "$PROJECT_PATH" || ! -d "$PROJECT_PATH" ]]; then
+    restore_archive_backup "$ARCHIVE_DEST" "$CENTRAL_DB_DIR" "$CLEAN_EXTRACT_APP"
+    echo "❌ Gagal mengekstrak arsip." >&2
+    exit 1
+  fi
   log "Folder project hasil ekstraksi: $PROJECT_PATH"
 fi
 
@@ -333,7 +425,10 @@ if [[ -z "$PROJECT_NAME" ]]; then
   echo "❌ Nama project tidak valid setelah normalisasi: '$RAW_NAME'." >&2
   exit 1
 fi
-check_duplicate_deploy "$PROJECT_NAME"
+# Archive targets are checked before extraction; copied Compose files are source content.
+if [[ -z "$ARCHIVE_FILE" ]]; then
+  check_duplicate_deploy "$PROJECT_NAME"
+fi
 
 # ==============================================================================
 # ██████████████████████  MODE MONOLITH  █████████████████████████████████████

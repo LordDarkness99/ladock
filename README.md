@@ -139,7 +139,7 @@ Batas memori default dikonfigurasi melalui `resources.memory_limit` di `config.j
 
 Saat deploy, kredensial database dibaca hanya dari file `.env` service (`DB_DATABASE`, `DB_USERNAME`/`DB_USER`, dan `DB_PASSWORD`); `.env.example` tidak dibaca ataupun disalin sebagai fallback. Jika `.env` atau variabelnya tidak tersedia, LaDock memakai kredensial tersimpan atau membuat hanya nilai yang belum ada. Nilai aplikasi lain seperti `APP_KEY` tidak dibuat ulang atau ditimpa; file `.env` service dimuat langsung oleh Compose.
 
-Deploy ditolak jika nama project yang sama sudah terdaftar dari file Compose deployment atau container Docker (termasuk container yang sedang berhenti). Proses deploy yang berjalan bersamaan untuk project yang sama juga dikunci dan ditolak, termasuk dari Deploy Hub. Untuk memperbarui deployment yang ada secara sengaja, berikan folder deployment yang sama dengan opsi `--replace-existing`. Opsi ini tidak dapat digunakan untuk menimpa folder tujuan ekstraksi arsip.
+Deploy ditolak jika nama project yang sama sudah terdaftar dari file Compose deployment atau container Docker (termasuk container yang sedang berhenti). Proses deploy yang berjalan bersamaan untuk project yang sama juga dikunci dan ditolak. Untuk mengganti deployment arsip yang sudah ada secara sengaja, aktifkan **Ganti deployment arsip yang sudah ada (backup dulu)** di Deploy Hub atau gunakan `--replace-existing`. LaDock menyimpan source lama, dump SQL lokal, dan snapshot database aktif di `docker/backups/deployments/` sebelum ekstraksi; opsi ini tidak mengimpor dump baru secara paksa.
 
 Untuk aplikasi PHP lama yang memakai konfigurasi ADOdb `mysql`, deploy mengalihkan konfigurasi `lib/includes/database.php` ke driver `mysqli` dan kredensial dari `.env`. Compat helper juga memperbarui signature driver ADOdb lama, menangani hasil query non-recordset dengan aman, mengubah sintaks akses offset kurung kurawal pada library legacy (termasuk dependency Symfony 1), dan mengaktifkan constructor bernama `__construct` yang dibutuhkan PHP 8 pada library patTemplate. Image PHP menyertakan ekstensi `mysqli` dan `pdo_mysql`. Source aplikasi dipasang sebagai bind mount oleh Compose, jadi image tidak menyalin seluruh source saat build; ini mengurangi ukuran build context dan waktu build.
 
@@ -199,12 +199,22 @@ Jalankan dashboard interaktif untuk mengontrol seluruh sistem:
 # Cek status / hentikan:
 ./monitor.sh status
 ./monitor.sh stop
+
+# Deploy beberapa folder/arsip secara berurutan (port otomatis):
+./monitor.sh deploy /path/ke/app-satu /path/ke/app-dua
+
+# Ganti deployment arsip yang sudah ada setelah membuat backup:
+./monitor.sh deploy /path/ke/cpmove-project.tar.gz --replace-existing
+
+# Opsi yang sama diterapkan ke setiap project dalam antrean:
+./monitor.sh deploy /path/ke/app-satu /path/ke/app-dua --memory-limit=1G
 ```
 Akses di browser: **`http://localhost:9090`**
 
 ### Fitur Dashboard Web:
 - **Overview**: Status kesehatan cluster, Central DB status pill, grafik CPU & RAM.
 - **Deploy Hub**: Drag-and-drop upload arsip `.zip` / `.tar.gz`, konfigurasi port, dan live terminal streaming output via **Server-Sent Events (SSE)**.
+- **Multi-deploy**: Masukkan beberapa path folder aplikasi atau unggah beberapa arsip di Deploy Hub untuk menjalankannya berurutan; semua opsi deploy yang dipilih berlaku ke setiap target.
 - **Aplikasi**: Daftar aplikasi ter-deploy beserta badge stack, path, tombol redeploy, dan destroy.
 - **Database Sentral**: Tinjau direktori `mysql/db/` dan jalankan backup / restore 1-klik.
 - **Konfigurasi**: Editor visual untuk `config.json` dan `.ladock_db.env`.
