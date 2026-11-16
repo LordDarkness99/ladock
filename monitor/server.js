@@ -19,10 +19,12 @@ const ENV_FILE = path.join(ROOT_DIR, '.ladock_db.env');
 const SUMMARIES_FILE = path.join(ROOT_DIR, '.documentapps', 'summaries.json');
 const UPLOADS_DIR = path.join(ROOT_DIR, 'uploads');
 const LOGS_DIR = path.join(ROOT_DIR, 'logs');
+const DEPLOY_QUEUE_DIR = path.join(LOGS_DIR, 'deploy-queues');
 
 // Pastikan direktori uploads dan logs ada
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
+if (!fs.existsSync(DEPLOY_QUEUE_DIR)) fs.mkdirSync(DEPLOY_QUEUE_DIR, { recursive: true });
 
 function loadConfig() {
   try {
@@ -49,6 +51,77 @@ const PORT = process.env.PORT || (config.dashboard && config.dashboard.port) || 
 // Riwayat Deployment In-Memory + Persisted
 const deployHistory = [];
 const activeStreams = new Map();
+
+function launchCheckpointQueue(deployId, statePath) {
+  const logPath = path.join(LOGS_DIR, `${deployId}.log`);
+  const batchScript = path.join(ROOT_DIR, 'scripts', 'deploy_batch.py');
+  const proc = spawn('python3', [batchScript, 'run', '--state-file', statePath], { cwd: ROOT_DIR });
+  const historyItem = {
+    id: deployId,
+    args: 'batch deployment',
+    status: 'running',
+    started_at: new Date().toISOString(),
+    log_file: logPath,
+    resumable: false
+  };
+  deployHistory.unshift(historyItem);
+
+  const logStream = fs.createWriteStream(logPath, { flags: 'a' });
+  activeStreams.set(deployId, { proc, listeners: [] });
+  const appendOutput = data => {
+    logStream.write(data);
+    const listeners = activeStreams.get(deployId)?.listeners || [];
+    listeners.forEach(fn => fn(data.toString()));
+  };
+  proc.stdout.on('data', appendOutput);
+  proc.stderr.on('data', appendOutput);
+  proc.on('error', err => appendOutput(`\n❌ Gagal menjalankan checkpoint: ${err.message}\n`));
+  proc.on('close', code => {
+    const completionMessage = `\n[SELESAI] Exit code: ${code}\n`;
+    logStream.write(completionMessage);
+    logStream.end();
+    try {
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      historyItem.status = state.status || (code === 0 ? 'success' : 'failed');
+      historyItem.resumable = historyItem.status !== 'success';
+    } catch (err) {
+      console.error(`Error reading deployment checkpoint ${deployId}:`, err.message);
+      historyItem.status = code === 0 ? 'success' : 'failed';
+    }
+    historyItem.finished_at = new Date().toISOString();
+    const listeners = activeStreams.get(deployId)?.listeners || [];
+    listeners.forEach(fn => fn(`${completionMessage}[STREAM_END]`));
+    activeStreams.delete(deployId);
+  });
+  return historyItem;
+}
+
+function readCheckpointHistory() {
+  return fs.readdirSync(DEPLOY_QUEUE_DIR)
+    .filter(name => name.endsWith('.json'))
+    .flatMap(name => {
+      try {
+        const state = JSON.parse(fs.readFileSync(path.join(DEPLOY_QUEUE_DIR, name), 'utf8'));
+        if (!state.id || !Array.isArray(state.jobs)) return [];
+        const status = state.status === 'running' && !activeStreams.has(state.id)
+          ? 'interrupted'
+          : state.status || 'unknown';
+        return [{
+          id: state.id,
+          args: `batch deployment (${state.jobs.length} project)`,
+          status,
+          started_at: state.started_at || state.created_at,
+          finished_at: state.finished_at || undefined,
+          log_file: path.join(LOGS_DIR, `${state.id}.log`),
+          resumable: status !== 'success' && !activeStreams.has(state.id)
+        }];
+      } catch (err) {
+        console.error(`Error reading deployment checkpoint ${name}:`, err.message);
+        return [];
+      }
+    })
+    .sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
+}
 
 // Helper Response JSON
 function sendJSON(res, data, statusCode = 200) {
@@ -376,10 +449,76 @@ const server = http.createServer(async (req, res) => {
           sendError(res, 'Opsi penggantian deployment tidak valid.', 400);
           return;
         }
-        if (params.replace_existing && !params.archive) {
+        if (params.replace_existing && !params.archive && !Array.isArray(params.jobs)) {
           sendError(res, 'Backup dan penggantian deployment hanya tersedia untuk arsip.', 400);
           return;
         }
+        if (Array.isArray(params.jobs)) {
+          if (params.jobs.length < 1 || params.jobs.length > 100) {
+            sendError(res, 'Batch harus berisi 1 sampai 100 project.', 400);
+            return;
+          }
+          const invalidJob = params.jobs.some(job => {
+            if (!job || typeof job !== 'object') return true;
+            const hasPath = typeof job.path === 'string' && job.path.trim().length > 0;
+            const hasArchive = typeof job.archive === 'string' && job.archive.trim().length > 0;
+            return Number(hasPath) + Number(hasArchive) !== 1;
+          });
+          if (invalidJob) {
+            sendError(res, 'Setiap project harus memiliki tepat satu path folder atau path arsip.', 400);
+            return;
+          }
+          if (params.replace_existing && params.jobs.some(job => !job.archive)) {
+            sendError(res, 'Backup dan penggantian deployment hanya tersedia untuk arsip.', 400);
+            return;
+          }
+
+          const deployId = `deploy_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+          const deployArgs = job => {
+            const cmdArgs = [];
+            if (job.archive) cmdArgs.push(`--archive=${job.archive}`);
+            else cmdArgs.push(job.path);
+            cmdArgs.push(String(params.http_port || 'auto'));
+            if (params.db_port) cmdArgs.push(String(params.db_port));
+            if (params.php_version) cmdArgs.push(String(params.php_version));
+            if (params.force_import) cmdArgs.push('--force-import');
+            if (params.skip_import) cmdArgs.push('--skip-import');
+            if (params.replace_existing) cmdArgs.push('--replace-existing');
+            if (params.mode) cmdArgs.push(`--mode=${params.mode}`);
+            if (params.memory_limit) cmdArgs.push(`--memory-limit=${params.memory_limit}`);
+            return cmdArgs;
+          };
+          const statePath = path.join(DEPLOY_QUEUE_DIR, `${deployId}.json`);
+          const state = {
+            id: deployId,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            started_at: null,
+            finished_at: null,
+            status: 'pending',
+            deploy_script: path.join(ROOT_DIR, 'deploy.sh'),
+            options: [],
+            jobs: params.jobs.map(job => {
+              const target = job.archive || job.path;
+              return {
+                target,
+                archive: Boolean(job.archive),
+                args: deployArgs(job),
+                status: 'pending',
+                attempts: 0,
+                started_at: null,
+                finished_at: null,
+                exit_code: null,
+                deploy_started: false
+              };
+            })
+          };
+          fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+          const historyItem = launchCheckpointQueue(deployId, statePath);
+          sendJSON(res, { success: true, deploy_id: deployId, history: historyItem });
+          return;
+        }
+
         const deployId = 'deploy_' + Date.now();
         const logPath = path.join(LOGS_DIR, `${deployId}.log`);
 
@@ -443,6 +582,39 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === '/api/deploy/resume' && method === 'POST') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      try {
+        const { deploy_id: deployId } = JSON.parse(body || '{}');
+        if (typeof deployId !== 'string' || !/^deploy_[A-Za-z0-9_-]+$/.test(deployId)) {
+          sendError(res, 'ID checkpoint tidak valid.', 400);
+          return;
+        }
+        if (activeStreams.has(deployId)) {
+          sendError(res, 'Batch deployment tersebut masih berjalan.', 409);
+          return;
+        }
+        const statePath = path.join(DEPLOY_QUEUE_DIR, `${deployId}.json`);
+        if (!fs.existsSync(statePath)) {
+          sendError(res, 'Checkpoint deployment tidak ditemukan.', 404);
+          return;
+        }
+        const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+        if (state.status === 'success') {
+          sendError(res, 'Checkpoint deployment tersebut sudah berhasil.', 409);
+          return;
+        }
+        const historyItem = launchCheckpointQueue(deployId, statePath);
+        sendJSON(res, { success: true, deploy_id: deployId, history: historyItem });
+      } catch (err) {
+        sendError(res, err.message);
+      }
+    });
+    return;
+  }
+
   // 6. API: SSE Streaming untuk Deploy Logs
   if (pathname === '/api/deploy/stream' && method === 'GET') {
     const deployId = parsedUrl.query.deployId;
@@ -482,7 +654,11 @@ const server = http.createServer(async (req, res) => {
 
   // 7. API: Deploy History
   if (pathname === '/api/deploy/history' && method === 'GET') {
-    sendJSON(res, { history: deployHistory });
+    const historyById = new Map(readCheckpointHistory().map(item => [item.id, item]));
+    deployHistory.forEach(item => historyById.set(item.id, item));
+    sendJSON(res, { history: [...historyById.values()].sort(
+      (a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0)
+    ) });
     return;
   }
 
@@ -521,7 +697,10 @@ const server = http.createServer(async (req, res) => {
           return sendJSON(res, { success: true, message: `Aplikasi berhasil dihentikan/destroy.` });
         } else if (action === 'redeploy') {
           const deployScript = path.join(ROOT_DIR, 'deploy.sh');
-          execSync(`bash "${deployScript}" "${app_path}"`, { timeout: 60000, cwd: ROOT_DIR });
+          execFileSync('bash', [deployScript, app_path, '--replace-existing'], {
+            timeout: 60000,
+            cwd: ROOT_DIR
+          });
           return sendJSON(res, { success: true, message: `Aplikasi berhasil di-redeploy.` });
         }
         sendError(res, 'Aksi tidak didukung');

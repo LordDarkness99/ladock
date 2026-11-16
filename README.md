@@ -133,13 +133,24 @@ chmod +x deploy.sh destroy.sh central_db.sh monitor.sh
 
 # Override batas memori default (512M) untuk setiap service saat deploy:
 ./deploy.sh /path/ke/folder-project 8080 3310 --memory-limit=1G
+
+# Batch deploy dengan checkpoint; lanjutkan batch terakhir yang gagal/terhenti:
+./monitor.sh deploy /path/project-1 /path/project-2
+./monitor.sh resume
+
+# Atau lanjutkan checkpoint tertentu:
+./monitor.sh resume queue_ID
 ```
+
+Batch Deploy Hub dan `monitor.sh deploy` menyimpan checkpoint di `logs/deploy-queues/`. Project yang sudah berhasil dilewati saat resume; project yang sedang berjalan ketika proses terhenti diulang dari awal. Jika proses sudah melewati pemeriksaan awal, resume melanjutkan target yang sama dan mengekstrak ulang arsip parsial bila diperlukan; backup deployment lama yang dibuat saat opsi replace dipilih tetap dipertahankan. ID checkpoint ditampilkan di output CLI dan tersedia pada Riwayat Deploy di dashboard.
 
 Batas memori default dikonfigurasi melalui `resources.memory_limit` di `config.json` (default `512M`). Opsi `--memory-limit=SIZE` mengatur batas custom seragam untuk service aplikasi dan gateway. Dashboard Deploy Hub menyediakan kolom yang sama; jika dibiarkan kosong, nilai default konfigurasi digunakan. Port HTTP yang tidak diberikan dipilih otomatis mulai dari `default_ports.monolith_http` atau `default_ports.gateway_http` (default `8080`); port yang sudah dipakai akan dilewati dengan kenaikan `+1`. Untuk microservices, gateway dan port akses langsung service dialokasikan berurutan dari port kosong berikutnya. Dashboard memiliki tombol **Cek Port** untuk melihat port yang tersedia/terpakai. Port eksplisit menjadi titik awal pencarian, bukan jaminan memakai port tersebut. Port DB sentral tetap `3310` di host (`3306` di jaringan Docker).
 
 Saat deploy, kredensial database dibaca hanya dari file `.env` service (`DB_DATABASE`, `DB_USERNAME`/`DB_USER`, dan `DB_PASSWORD`); `.env.example` tidak dibaca ataupun disalin sebagai fallback. Jika `.env` atau variabelnya tidak tersedia, LaDock memakai kredensial tersimpan atau membuat hanya nilai yang belum ada. Nilai aplikasi lain seperti `APP_KEY` tidak dibuat ulang atau ditimpa; file `.env` service dimuat langsung oleh Compose.
 
 Deploy ditolak jika nama project yang sama sudah terdaftar dari file Compose deployment atau container Docker (termasuk container yang sedang berhenti). Proses deploy yang berjalan bersamaan untuk project yang sama juga dikunci dan ditolak. Untuk mengganti deployment arsip yang sudah ada secara sengaja, aktifkan **Ganti deployment arsip yang sudah ada (backup dulu)** di Deploy Hub atau gunakan `--replace-existing`. LaDock menyimpan source lama, dump SQL lokal, dan snapshot database aktif di `docker/backups/deployments/` sebelum ekstraksi; opsi ini tidak mengimpor dump baru secara paksa.
+
+Source aplikasi disalin ke `docker/apps/<nama>/src` (atau `docker/apps/<nama>/apps/<service>` untuk microservices), bukan disinkronkan dari direktori asal. Untuk PHP, source hasil deploy dipasang sebagai bind mount: perubahan file di folder deploy biasanya langsung terlihat tanpa deploy ulang. Perubahan pada folder sumber asal tidak otomatis tersalin. Gunakan **Redeploy** untuk membangun ulang container setelah perubahan dependency, Dockerfile/runtime, atau konfigurasi deployment; aplikasi dengan cache/framework tertentu mungkin perlu cache dibersihkan atau container direstart.
 
 Untuk aplikasi PHP lama yang memakai konfigurasi ADOdb `mysql`, deploy mengalihkan konfigurasi `lib/includes/database.php` ke driver `mysqli` dan kredensial dari `.env`. Compat helper juga memperbarui signature driver ADOdb lama, menangani hasil query non-recordset dengan aman, mengubah sintaks akses offset kurung kurawal pada library legacy (termasuk dependency Symfony 1), dan mengaktifkan constructor bernama `__construct` yang dibutuhkan PHP 8 pada library patTemplate. Image PHP menyertakan ekstensi `mysqli` dan `pdo_mysql`. Source aplikasi dipasang sebagai bind mount oleh Compose, jadi image tidak menyalin seluruh source saat build; ini mengurangi ukuran build context dan waktu build.
 

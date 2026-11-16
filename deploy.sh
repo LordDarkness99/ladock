@@ -49,6 +49,7 @@ DUMP_FILE=""
 FORCE_IMPORT=0
 SKIP_IMPORT=0
 REPLACE_EXISTING=0
+RESUME_EXISTING=0
 ARCHIVE_FILE=""
 ARCHIVE_DEST=""
 DEPLOY_MODE=""        # "" | "monolith" | "microservice"
@@ -65,6 +66,7 @@ for arg in "$@"; do
     --force-import)    FORCE_IMPORT=1 ;;
     --skip-import)     SKIP_IMPORT=1 ;;
     --replace-existing) REPLACE_EXISTING=1 ;;
+    --resume-existing) RESUME_EXISTING=1 ;;
     --archive=*)       ARCHIVE_FILE="${arg#--archive=}" ;;
     --zip=*)           ARCHIVE_FILE="${arg#--zip=}" ;;
     --cpmove=*)        ARCHIVE_FILE="${arg#--cpmove=}" ;;
@@ -284,6 +286,10 @@ check_duplicate_deploy() {
     log "Mode replace aktif untuk project '$slug'; deployment yang ada akan diperbarui, bukan diduplikasi."
     return 0
   fi
+  if [[ "$RESUME_EXISTING" -eq 1 ]]; then
+    log "Melanjutkan checkpoint project '$slug'; pemeriksaan duplikat dilewati untuk target yang sama."
+    return 0
+  fi
   if ! container_names="$(docker ps -a --format '{{.Names}}')"; then
     echo "❌ Gagal memeriksa container Docker; deploy dibatalkan demi mencegah duplikasi." >&2
     return 1
@@ -361,12 +367,13 @@ if [[ -n "$ARCHIVE_FILE" ]]; then
   CENTRAL_DB_DIR="$SCRIPT_DIR/mysql/db/$CLEAN_EXTRACT_APP"
   if [[ "$REPLACE_EXISTING" -eq 1 ]]; then
     backup_archive_deployment "$CLEAN_EXTRACT_APP" "$ARCHIVE_DEST" "$CENTRAL_DB_DIR"
-  elif [[ -e "$ARCHIVE_DEST" ]]; then
+  elif [[ "$RESUME_EXISTING" -eq 0 && -e "$ARCHIVE_DEST" ]]; then
     echo "❌ Folder tujuan arsip sudah ada: $ARCHIVE_DEST. Pilih tujuan baru agar data tidak tertimpa." >&2
     exit 1
   fi
   mkdir -p "$CENTRAL_DB_DIR"
 
+  log "Checkpoint: target arsip lolos pemeriksaan dan siap diekstrak."
   log "Mengekstrak dan memvalidasi arsip ($ARCHIVE_FILE)..."
   if ! PROJECT_PATH="$(python3 "$SCRIPTS_DIR/extract_archive.py" "$ARCHIVE_FILE" "$ARCHIVE_DEST" "$CENTRAL_DB_DIR")"; then
     restore_archive_backup "$ARCHIVE_DEST" "$CENTRAL_DB_DIR" "$CLEAN_EXTRACT_APP"
@@ -428,6 +435,7 @@ fi
 # Archive targets are checked before extraction; copied Compose files are source content.
 if [[ -z "$ARCHIVE_FILE" ]]; then
   check_duplicate_deploy "$PROJECT_NAME"
+  log "Checkpoint: target project lolos pemeriksaan deployment."
 fi
 
 # ==============================================================================

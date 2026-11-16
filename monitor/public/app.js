@@ -310,39 +310,32 @@ async function handleDeploySubmit(event) {
   document.getElementById('btn-submit-deploy').disabled = true;
   showToast(`Memulai antrean ${deployJobs.length} deployment...`, 'info');
 
-  let failures = 0;
-  for (let index = 0; index < deployJobs.length; index += 1) {
-    const job = deployJobs[index];
-    const target = job.path || job.archive;
-    term.innerText += `\n[${index + 1}/${deployJobs.length}] Deploy: ${target}\n`;
-    term.scrollTop = term.scrollHeight;
-
-    try {
-      const res = await apiFetch('/api/deploy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...options, ...job })
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success || !data.deploy_id) {
-        throw new Error(data.error || `Permintaan deploy gagal (HTTP ${res.status}).`);
-      }
-
-      const succeeded = await new Promise(resolve => startDeployStream(data.deploy_id, resolve));
-      if (!succeeded) failures += 1;
-    } catch (error) {
-      failures += 1;
-      term.innerText += `❌ Gagal deploy ${target}: ${error.message}\n`;
-      term.scrollTop = term.scrollHeight;
+  try {
+    const res = await apiFetch('/api/deploy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...options, jobs: deployJobs })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success || !data.deploy_id) {
+      throw new Error(data.error || `Permintaan deploy gagal (HTTP ${res.status}).`);
     }
-  }
 
-  document.getElementById('btn-submit-deploy').disabled = false;
-  const succeeded = deployJobs.length - failures;
-  term.innerText += `\nAntrean selesai: ${succeeded} berhasil, ${failures} gagal.\n`;
-  showToast(`Antrean selesai: ${succeeded} berhasil, ${failures} gagal.`, failures ? 'error' : 'success');
-  fetchStatus();
-  loadDeployedApps();
+    const succeeded = await new Promise(resolve => startDeployStream(data.deploy_id, resolve));
+    showToast(
+      succeeded ? 'Antrean deployment berhasil.' : 'Antrean gagal/terhenti. Lanjutkan dari Riwayat Deploy.',
+      succeeded ? 'success' : 'error'
+    );
+  } catch (error) {
+    term.innerText += `❌ Gagal memulai antrean: ${error.message}\n`;
+    term.scrollTop = term.scrollHeight;
+    showToast(error.message, 'error');
+  } finally {
+    document.getElementById('btn-submit-deploy').disabled = false;
+    fetchStatus();
+    loadDeployedApps();
+    loadDeployHistory();
+  }
 }
 
 function startDeployStream(deployId, onComplete = null) {
@@ -664,15 +657,47 @@ async function loadDeployHistory() {
     tbody.innerHTML = '';
     history.forEach(h => {
       const tr = document.createElement('tr');
+      const resumeButton = h.resumable
+        ? `<button class="btn-sm btn-primary" onclick="resumeDeployQueue('${h.id}')">Lanjutkan</button>`
+        : '';
       tr.innerHTML = `
         <td><small>${new Date(h.started_at).toLocaleTimeString()}</small></td>
         <td><code>${h.args || 'deploy'}</code></td>
-        <td><span class="badge ${h.status === 'success' ? 'badge-success' : 'badge-danger'}">${h.status}</span></td>
-        <td><button class="btn-sm btn-outline" onclick="viewHistoricalLog('${h.id}')">Lihat Log</button></td>
+        <td><span class="badge ${h.status === 'success' ? 'badge-success' : h.status === 'running' ? 'badge-warning' : 'badge-danger'}">${h.status}</span></td>
+        <td><button class="btn-sm btn-outline" onclick="viewHistoricalLog('${h.id}')">Lihat Log</button> ${resumeButton}</td>
       `;
       tbody.appendChild(tr);
     });
   } catch (e) { console.error(e); }
+}
+
+async function resumeDeployQueue(deployId) {
+  switchTab('tab-deploy');
+  const term = document.getElementById('deploy-live-terminal');
+  term.innerText = `Melanjutkan checkpoint ${deployId}...\n`;
+  try {
+    const res = await apiFetch('/api/deploy/resume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deploy_id: deployId })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success || !data.deploy_id) {
+      throw new Error(data.error || `Resume gagal (HTTP ${res.status}).`);
+    }
+    const succeeded = await new Promise(resolve => startDeployStream(data.deploy_id, resolve));
+    showToast(
+      succeeded ? 'Checkpoint deployment berhasil diselesaikan.' : 'Deployment masih gagal/terhenti.',
+      succeeded ? 'success' : 'error'
+    );
+  } catch (error) {
+    term.innerText += `❌ ${error.message}\n`;
+    showToast(error.message, 'error');
+  } finally {
+    loadDeployHistory();
+    fetchStatus();
+    loadDeployedApps();
+  }
 }
 
 function viewHistoricalLog(deployId) {
