@@ -61,40 +61,42 @@ def _runtime_for_service(service_path: str) -> dict:
 def build_app_compose(
     project: str,
     services: list[dict],
-    gateway_port: int,
-    php_versions: dict[str, str],
-    composer_versions: dict[str, str],
+    gateway_port: int | None = None,
+    php_versions: dict[str, str] | None = None,
+    composer_versions: dict[str, str] | None = None,
     service_paths: dict[str, str] | None = None,
     docker_dir: str = ".docker",
     vhost_dir: str | None = None,
     memory_limit: str = "512M",
     central_db_network: str = "ladock_net",
+    no_gateway: bool = False,
 ) -> str:
     memory_limit = _validate_memory_limit(memory_limit)
     lines: list[str] = ["services:"]
 
-    # Gateway
-    lines += [
-        "",
-        f"  gateway_{project}:",
-        f"    build:",
-        f"      context: .docker/gateway",
-        f"      dockerfile: Dockerfile",
-        f"    container_name: {project}_gateway",
-        f"    restart: unless-stopped",
-        f"    mem_limit: {memory_limit}",
-        f"    ports:",
-        f'      - "{gateway_port}:80"',
-        f"    volumes:",
-        f"      - ./.docker/apache-gateway.conf:/usr/local/apache2/conf/extra/vhost.conf:ro",
-        f"    depends_on:",
-    ]
-    for svc in services:
-        lines.append(f"      - app_{svc['name']}")
-    lines += [
-        f"    networks:",
-        f"      - {central_db_network}",
-    ]
+    # Gateway (opsional, hanya jika no_gateway=False dan gateway_port diberikan)
+    if not no_gateway and gateway_port is not None:
+        lines += [
+            "",
+            f"  gateway_{project}:",
+            f"    build:",
+            f"      context: .docker/gateway",
+            f"      dockerfile: Dockerfile",
+            f"    container_name: {project}_gateway",
+            f"    restart: unless-stopped",
+            f"    mem_limit: {memory_limit}",
+            f"    ports:",
+            f'      - "{gateway_port}:80"',
+            f"    volumes:",
+            f"      - ./.docker/apache-gateway.conf:/usr/local/apache2/conf/extra/vhost.conf:ro",
+            f"    depends_on:",
+        ]
+        for svc in services:
+            lines.append(f"      - app_{svc['name']}")
+        lines += [
+            f"    networks:",
+            f"      - {central_db_network}",
+        ]
 
     # Service app containers
     for svc in services:
@@ -179,7 +181,8 @@ def main():
     ap.add_argument("--service-paths",     default="",   help="'name1:/path1,name2:/path2,...'")
     ap.add_argument("--docker-dir",        default=".docker", help="Path ke folder .docker/ (absolut)")
     ap.add_argument("--vhost-dir",         default=None,      help="Folder berisi vhost per-service (opsional)")
-    ap.add_argument("--gateway-port",      required=True, type=int)
+    ap.add_argument("--gateway-port",      default=None, type=int, help="Port gateway (opsional jika --no-gateway)")
+    ap.add_argument("--no-gateway",        action="store_true", default=False, help="Jangan sertakan service gateway")
     ap.add_argument("--memory-limit",      type=_validate_memory_limit, default="512M",
                     help="Batas memori untuk setiap service (contoh: 512M, 1G)")
     ap.add_argument("--central-db-network", default="ladock_net")
@@ -209,6 +212,7 @@ def main():
         vhost_dir=args.vhost_dir,
         memory_limit=args.memory_limit,
         central_db_network=args.central_db_network,
+        no_gateway=args.no_gateway or (args.gateway_port is None),
     )
 
     app_file_path = os.path.join(args.output_dir, ".docker-compose-app.yml")

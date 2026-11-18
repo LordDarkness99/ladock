@@ -89,6 +89,9 @@
   "scripts/check_duplicate_deploy.py": {
     "summary": "Mendeteksi deployment proyek yang sudah ada melalui file Compose atau nama container, termasuk deployment lama di direktori legacy."
   },
+  "scripts/check_service_usage.py": {
+    "summary": "Mengevaluasi keaktifan service pada deployment cPanel/microservices berdasarkan VirtualHost cPanel, traffic bandwidth, keberadaan dump SQL, artefak arsip, dan pola modul tesis/uji coba, serta memfilter hanya service aktif yang dideploy."
+  },
   "scripts/update_adodb_config.py": {
     "summary": "Memperbarui konfigurasi ADOdb PHP lama ke mysqli, menyelaraskan kredensial dari .env, dan memperbaiki signature, hasil query non-recordset, offset kurung kurawal, serta constructor patTemplate agar kompatibel dengan PHP 8."
   },

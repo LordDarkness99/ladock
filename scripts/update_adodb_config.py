@@ -67,6 +67,26 @@ def update_adodb_config(config_path: Path, env_path: Path) -> bool:
     return changed
 
 
+def update_legacy_path_config(path_file: Path, env_path: Path) -> bool:
+    """Ensure legacy path.php uses getenv('APP_URL') rather than hardcoded domain."""
+    if not path_file.is_file():
+        return False
+    source = path_file.read_text(encoding="utf-8")
+    if "getenv('APP_URL')" in source:
+        return False
+
+    pattern = re.compile(
+        r"(?m)^(\s*define\s*\(\s*['\"]BASE_URL['\"]\s*,\s*).*?(\.PATH\s*\)\s*;)"
+    )
+    if pattern.search(source):
+        replacement = r"\1(getenv('APP_URL') ? rtrim(getenv('APP_URL'), '/') : 'http://' . ($_SERVER['HTTP_HOST'] ?? 'localhost'))\2"
+        updated = pattern.sub(replacement, source)
+        if updated != source:
+            path_file.write_text(updated, encoding="utf-8")
+            return True
+    return False
+
+
 def update_adodb_mysqli_driver(driver_path: Path) -> bool:
     source = driver_path.read_text(encoding="utf-8")
     signature = re.compile(
@@ -230,15 +250,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path)
     parser.add_argument("--env", type=Path)
+    parser.add_argument("--path-config", type=Path, help="File path.php yang memuat definisi BASE_URL")
     parser.add_argument("--driver", action="append", default=[], type=Path)
     parser.add_argument("--php-root", action="append", default=[], type=Path)
     parser.add_argument("--modernize-php4-constructor-root", action="append", default=[], type=Path)
     parser.add_argument("--registry", action="append", default=[], type=Path)
     args = parser.parse_args()
-    if bool(args.config) != bool(args.env):
+    if bool(args.config) != bool(args.env) and not args.path_config:
         parser.error("--config dan --env harus diberikan bersamaan.")
     if (
         not args.config
+        and not args.path_config
         and not args.driver
         and not args.php_root
         and not args.modernize_php4_constructor_root
@@ -250,6 +272,8 @@ def main() -> None:
 
     try:
         changed = update_adodb_config(args.config, args.env) if args.config else False
+        if args.path_config and args.env:
+            changed = update_legacy_path_config(args.path_config, args.env) or changed
         for driver_path in args.driver:
             if not driver_path.is_file():
                 raise ValueError(f"Driver ADOdb tidak ditemukan: {driver_path}")

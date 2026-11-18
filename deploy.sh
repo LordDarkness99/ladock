@@ -59,6 +59,11 @@ BASE_APP_PORT_CUSTOM=0
 MEMORY_LIMIT="$DEFAULT_MEMORY_LIMIT"
 LOCKED_PROJECT_SLUG=""
 PROJECT_LOCK_FD=""
+DEPLOY_ALL_SERVICES=0
+INCLUDE_SERVICES=""
+EXCLUDE_SERVICES=""
+CHECK_ONLY=0
+USE_GATEWAY=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -76,6 +81,12 @@ for arg in "$@"; do
     --max-depth=*)     MAX_DEPTH="${arg#--max-depth=}" ;;
     --base-app-port=*) BASE_APP_PORT="${arg#--base-app-port=}"; BASE_APP_PORT_CUSTOM=1 ;;
     --memory-limit=*)  MEMORY_LIMIT="${arg#--memory-limit=}" ;;
+    --all-services)    DEPLOY_ALL_SERVICES=1 ;;
+    --include-services=*|--include-service=*) INCLUDE_SERVICES="${arg#*=}" ;;
+    --exclude-services=*|--exclude-service=*) EXCLUDE_SERVICES="${arg#*=}" ;;
+    --check-only)      CHECK_ONLY=1 ;;
+    --with-gateway|--gateway) USE_GATEWAY=1 ;;
+    --no-gateway)      USE_GATEWAY=0 ;;
     *) ARGS+=("$arg") ;;
   esac
 done
@@ -137,6 +148,12 @@ Flags:
   --base-app-port=N  Port awal direct-access service microservice
   --memory-limit=SIZE Batas memori untuk setiap service (default: $DEFAULT_MEMORY_LIMIT; contoh: 1G)
   --replace-existing Ganti deployment yang ada; untuk arsip, backup dibuat terlebih dahulu
+  --all-services     Deploy seluruh service yang terdeteksi tanpa memfilter service tidak aktif
+  --include-service=NAME  Paksa service tertentu untuk tetap dideploy (bisa dipisah koma)
+  --exclude-service=NAME  Paksa service tertentu untuk tidak dideploy (bisa dipisah koma)
+  --check-only       Hanya periksa status keaktifan service tanpa menjalankan deployment
+  --with-gateway     Aktifkan reverse proxy Apache Gateway (default: tidak aktif)
+  --no-gateway       Jangan gunakan reverse proxy Gateway (default)
 
 Nama project yang sudah pernah di-deploy ditolak untuk mencegah deployment duplikat.
 Deploy bersamaan dengan nama project yang sama juga ditolak.
@@ -281,6 +298,7 @@ acquire_project_lock() {
 
 check_duplicate_deploy() {
   local slug="$1" container_names guard_result deployed
+  [[ "$CHECK_ONLY" -eq 1 ]] && return 0
   acquire_project_lock "$slug"
   if [[ "$REPLACE_EXISTING" -eq 1 ]]; then
     log "Mode replace aktif untuk project '$slug'; deployment yang ada akan diperbarui, bukan diduplikasi."
@@ -431,6 +449,18 @@ PROJECT_NAME="$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0
 if [[ -z "$PROJECT_NAME" ]]; then
   echo "❌ Nama project tidak valid setelah normalisasi: '$RAW_NAME'." >&2
   exit 1
+fi
+
+if [[ "$CHECK_ONLY" -eq 1 ]]; then
+  CHECK_ARGS=(--project-path "$PROJECT_PATH" --project-name "$PROJECT_NAME")
+  [[ -d "$PROJECT_PATH/.cpanel_metadata" ]] && CHECK_ARGS+=(--cpanel-meta "$PROJECT_PATH/.cpanel_metadata")
+  [[ -d "$SCRIPT_DIR/mysql/db/$PROJECT_NAME" ]] && CHECK_ARGS+=(--db-dumps-dir "$SCRIPT_DIR/mysql/db/$PROJECT_NAME")
+  [[ -n "$INCLUDE_SERVICES" ]] && CHECK_ARGS+=(--include "$INCLUDE_SERVICES")
+  [[ -n "$EXCLUDE_SERVICES" ]] && CHECK_ARGS+=(--exclude "$EXCLUDE_SERVICES")
+  [[ "$DEPLOY_ALL_SERVICES" -eq 1 ]] && CHECK_ARGS+=(--all)
+  python3 "$SCRIPTS_DIR/check_service_usage.py" "${CHECK_ARGS[@]}" --report
+  log "Mode --check-only selesai."
+  exit 0
 fi
 # Archive targets are checked before extraction; copied Compose files are source content.
 if [[ -z "$ARCHIVE_FILE" ]]; then
@@ -848,25 +878,71 @@ while IFS=$'\t' read -r svc_name svc_path; do
   SVC_PATHS["$svc_name"]="$svc_path"
 done <<< "$MICROSERVICE_LIST_RAW"
 
-EXPECTED_IMUNISASI_ORDER=(index2 individu surveylance tesis root_web)
-declare -A EXPECTED_IMUNISASI_SERVICE_SET=()
-HAS_ALL_IMUNISASI_SERVICES=1
-for expected_service in "${EXPECTED_IMUNISASI_ORDER[@]}"; do
-  EXPECTED_IMUNISASI_SERVICE_SET["$expected_service"]=1
-  [[ -n "${SVC_PATHS[$expected_service]:-}" ]] || HAS_ALL_IMUNISASI_SERVICES=0
-done
-if [[ "$HAS_ALL_IMUNISASI_SERVICES" -eq 1 ]]; then
-  ORDERED_SVC_NAMES=()
-  for expected_service in "${EXPECTED_IMUNISASI_ORDER[@]}"; do
-    ORDERED_SVC_NAMES+=("$expected_service")
-  done
-  for svc_name in "${SVC_NAMES[@]}"; do
-    if [[ -z "${EXPECTED_IMUNISASI_SERVICE_SET[$svc_name]:-}" ]]; then
-      ORDERED_SVC_NAMES+=("$svc_name")
-    fi
-  done
-  SVC_NAMES=("${ORDERED_SVC_NAMES[@]}")
+# ── Periksa Service yang Digunakan vs Tidak Digunakan ─────────────────────────
+CHECK_META_DIR=""
+if [[ -d "$PROJECT_PATH/.cpanel_metadata" ]]; then
+  CHECK_META_DIR="$PROJECT_PATH/.cpanel_metadata"
+elif [[ -n "${SOURCE_PROJECT_PATH:-}" && -d "$SOURCE_PROJECT_PATH/.cpanel_metadata" ]]; then
+  CHECK_META_DIR="$SOURCE_PROJECT_PATH/.cpanel_metadata"
+elif [[ -n "${ARCHIVE_DEST:-}" && -d "$ARCHIVE_DEST/.cpanel_metadata" ]]; then
+  CHECK_META_DIR="$ARCHIVE_DEST/.cpanel_metadata"
 fi
+
+CHECK_SVC_ARG=""
+for svc_name in "${SVC_NAMES[@]}"; do
+  [[ -n "$CHECK_SVC_ARG" ]] && CHECK_SVC_ARG+=","
+  CHECK_SVC_ARG+="${svc_name}:${SVC_PATHS[$svc_name]}"
+done
+
+CHECK_ARGS=(--services "$CHECK_SVC_ARG")
+[[ -n "$PROJECT_PATH" ]] && CHECK_ARGS+=(--project-path "$PROJECT_PATH")
+[[ -n "$CHECK_META_DIR" ]] && CHECK_ARGS+=(--cpanel-meta "$CHECK_META_DIR")
+CENTRAL_DB_DIR="$SCRIPT_DIR/mysql/db/$PROJECT_NAME"
+[[ -d "$CENTRAL_DB_DIR" ]] && CHECK_ARGS+=(--db-dumps-dir "$CENTRAL_DB_DIR")
+[[ -n "$INCLUDE_SERVICES" ]] && CHECK_ARGS+=(--include "$INCLUDE_SERVICES")
+[[ -n "$EXCLUDE_SERVICES" ]] && CHECK_ARGS+=(--exclude "$EXCLUDE_SERVICES")
+[[ "$DEPLOY_ALL_SERVICES" -eq 1 ]] && CHECK_ARGS+=(--all)
+
+# Jalankan pengecekan dan cetak laporan status service
+python3 "$SCRIPTS_DIR/check_service_usage.py" "${CHECK_ARGS[@]}" --report
+
+if [[ "$CHECK_ONLY" -eq 1 ]]; then
+  log "Mode --check-only selesai."
+  exit 0
+fi
+
+# Filter hanya service yang masih digunakan
+if [[ "$DEPLOY_ALL_SERVICES" -ne 1 ]]; then
+  USED_SVC_NAMES_STR="$(python3 "$SCRIPTS_DIR/check_service_usage.py" "${CHECK_ARGS[@]}" --used-only)"
+  read -r -a FILTERED_SVC_NAMES <<< "$USED_SVC_NAMES_STR"
+
+  if [[ ${#FILTERED_SVC_NAMES[@]} -gt 0 ]]; then
+    NEW_SVC_NAMES=()
+    for used in "${FILTERED_SVC_NAMES[@]}"; do
+      for svc in "${SVC_NAMES[@]}"; do
+        if [[ "$svc" == "$used" ]]; then
+          NEW_SVC_NAMES+=("$svc")
+          break
+        fi
+      done
+    done
+    SVC_NAMES=("${NEW_SVC_NAMES[@]}")
+  fi
+fi
+
+# Susun urutan: prioritaskan root_web pertama jika ada
+ORDERED_SVC_NAMES=()
+if [[ " ${SVC_NAMES[*]} " =~ [[:space:]]root_web[[:space:]] ]]; then
+  ORDERED_SVC_NAMES+=(root_web)
+fi
+for svc_name in "${SVC_NAMES[@]}"; do
+  if [[ "$svc_name" != "root_web" ]]; then
+    ORDERED_SVC_NAMES+=("$svc_name")
+  fi
+done
+SVC_NAMES=("${ORDERED_SVC_NAMES[@]}")
+
+log "Service yang dideploy (${#SVC_NAMES[@]}): ${SVC_NAMES[*]}"
 
 if [[ ${#SVC_NAMES[@]} -eq 0 ]]; then
   echo "❌ Tidak ada sub-project Laravel ditemukan di: $PROJECT_PATH"
@@ -922,21 +998,35 @@ for svc_name in "${SVC_NAMES[@]}"; do
   stop_existing_container "${PROJECT_NAME}_${svc_name}_app"
 done
 
-PORT_START="${HTTP_PORT:-$DEFAULT_GATEWAY_PORT}"
-PORT_RESULT="$(find_available_ports "$PORT_START" 1)"
-report_skipped_ports <<<"$PORT_RESULT"
-GATEWAY_PORT="$(printf '%s' "$PORT_RESULT" | read_selected_ports)"
-if [[ $BASE_APP_PORT_CUSTOM -eq 1 ]]; then
-  APP_PORT_START="$BASE_APP_PORT"
-else
-  APP_PORT_START=$((GATEWAY_PORT + 1))
-  if [[ "$APP_PORT_START" -lt "$DEFAULT_BASE_APP_PORT" ]]; then
-    APP_PORT_START="$DEFAULT_BASE_APP_PORT"
+if [[ $USE_GATEWAY -eq 1 ]]; then
+  PORT_START="${HTTP_PORT:-$DEFAULT_GATEWAY_PORT}"
+  PORT_RESULT="$(find_available_ports "$PORT_START" 1)"
+  report_skipped_ports <<<"$PORT_RESULT"
+  GATEWAY_PORT="$(printf '%s' "$PORT_RESULT" | read_selected_ports)"
+  if [[ $BASE_APP_PORT_CUSTOM -eq 1 ]]; then
+    APP_PORT_START="$BASE_APP_PORT"
+  else
+    APP_PORT_START=$((GATEWAY_PORT + 1))
+    if [[ "$APP_PORT_START" -lt "$DEFAULT_BASE_APP_PORT" ]]; then
+      APP_PORT_START="$DEFAULT_BASE_APP_PORT"
+    fi
   fi
+  BASE_PORT_RESULT="$(find_available_ports "$APP_PORT_START" "${#SVC_NAMES[@]}" "$GATEWAY_PORT")"
+  report_skipped_ports <<<"$BASE_PORT_RESULT"
+  mapfile -t APP_PORTS < <(printf '%s' "$BASE_PORT_RESULT" | read_selected_ports)
+else
+  GATEWAY_PORT=""
+  if [[ $BASE_APP_PORT_CUSTOM -eq 1 ]]; then
+    APP_PORT_START="$BASE_APP_PORT"
+  elif [[ -n "$HTTP_PORT" ]]; then
+    APP_PORT_START="$HTTP_PORT"
+  else
+    APP_PORT_START="$DEFAULT_MONOLITH_PORT"
+  fi
+  BASE_PORT_RESULT="$(find_available_ports "$APP_PORT_START" "${#SVC_NAMES[@]}")"
+  report_skipped_ports <<<"$BASE_PORT_RESULT"
+  mapfile -t APP_PORTS < <(printf '%s' "$BASE_PORT_RESULT" | read_selected_ports)
 fi
-BASE_PORT_RESULT="$(find_available_ports "$APP_PORT_START" "${#SVC_NAMES[@]}" "$GATEWAY_PORT")"
-report_skipped_ports <<<"$BASE_PORT_RESULT"
-mapfile -t APP_PORTS < <(printf '%s' "$BASE_PORT_RESULT" | read_selected_ports)
 
 CURRENT_APP_PORT=0
 for svc_name in "${SVC_NAMES[@]}"; do
@@ -980,19 +1070,28 @@ echo " Mode         : MICROSERVICE"
 echo " Project Root : $PROJECT_PATH"
 echo " Source Root  : $SOURCE_PROJECT_PATH"
 echo " Project Name : $PROJECT_NAME"
-echo " Gateway Port : $GATEWAY_PORT"
+if [[ $USE_GATEWAY -eq 1 ]]; then
+  echo " Gateway Port : $GATEWAY_PORT"
+fi
 echo " MySQL Host Port : $DEFAULT_DB_PORT (internal 3306)"
 echo " Services     : ${#SVC_NAMES[@]}"
 for svc_name in "${SVC_NAMES[@]}"; do
-  echo "   [$svc_name] ${SVC_RUNTIME_NAMES[$svc_name]} ${SVC_RUNTIME_VERSIONS[$svc_name]} | internal :${SVC_CONTAINER_PORTS[$svc_name]} | direct :${SVC_HTTP_PORTS[$svc_name]} | route /${SVC_ROUTE_NAMES[$svc_name]}/"
+  if [[ $USE_GATEWAY -eq 1 ]]; then
+    echo "   [$svc_name] ${SVC_RUNTIME_NAMES[$svc_name]} ${SVC_RUNTIME_VERSIONS[$svc_name]} | internal :${SVC_CONTAINER_PORTS[$svc_name]} | direct :${SVC_HTTP_PORTS[$svc_name]} | route /${SVC_ROUTE_NAMES[$svc_name]}/"
+  else
+    echo "   [$svc_name] ${SVC_RUNTIME_NAMES[$svc_name]} ${SVC_RUNTIME_VERSIONS[$svc_name]} | internal :${SVC_CONTAINER_PORTS[$svc_name]} | direct :${SVC_HTTP_PORTS[$svc_name]}"
+  fi
 done
 hr
 
 mkdir -p "$PROJECT_PATH/logs"
 DOCKER_DIR="$PROJECT_PATH/.docker"
 CREDS_DIR="$DOCKER_DIR/credentials"
-GATEWAY_DIR="$DOCKER_DIR/gateway"
-mkdir -p "$DOCKER_DIR" "$CREDS_DIR" "$GATEWAY_DIR"
+mkdir -p "$DOCKER_DIR" "$CREDS_DIR"
+if [[ $USE_GATEWAY -eq 1 ]]; then
+  GATEWAY_DIR="$DOCKER_DIR/gateway"
+  mkdir -p "$GATEWAY_DIR"
+fi
 
 for svc_name in "${SVC_NAMES[@]}"; do
   svc_path="${SVC_PATHS[$svc_name]}"
@@ -1010,9 +1109,17 @@ for svc_name in "${SVC_NAMES[@]}"; do
   [[ -n "$ENV_DB_USER" ]] || ENV_DB_USER="$(read_env_value "$svc_path/.env" DB_USER)"
   ENV_DB_PASS="$(read_env_value "$svc_path/.env" DB_PASSWORD)"
 
-  SHORT_SVC="$(echo "${PROJECT_NAME}_${svc_name}" | cut -c1-20)"
   DB_NAME="${ENV_DB_NAME:-${STORED_DB_NAME:-${PROJECT_NAME}_${svc_name}_db}}"
-  DB_USER="${ENV_DB_USER:-${STORED_DB_USER:-${SHORT_SVC}_u}}"
+  DB_USER="${ENV_DB_USER:-${STORED_DB_USER:-}}"
+  DB_USER_ARGS=()
+  for used_user in "${SVC_DB_USERS[@]}"; do
+    DB_USER_ARGS+=(--used "$used_user")
+  done
+  DB_USER="$(python3 "$SCRIPTS_DIR/db_credentials.py" \
+    --project "$PROJECT_NAME" \
+    --service "$svc_name" \
+    --preferred "$DB_USER" \
+    "${DB_USER_ARGS[@]}")"
   DB_PASS="${ENV_DB_PASS:-${STORED_DB_PASS:-$(openssl rand -hex 12)}}"
   SVC_DB_NAMES["$svc_name"]="$DB_NAME"
   SVC_DB_USERS["$svc_name"]="$DB_USER"
@@ -1120,55 +1227,10 @@ for svc_name in "${SVC_NAMES[@]}"; do
   SVC_PATHS_ARG+="${svc_name}:${SVC_PATHS[$svc_name]}"
 done
 
-log "Men-generate docker-compose-app.yml yang terhubung ke MySQL sentral..."
-python3 "$SCRIPTS_DIR/generate_compose.py" \
-  --project           "$PROJECT_NAME" \
-  --services          "$SERVICES_ARG" \
-  --service-paths     "${SVC_PATHS_ARG:-}" \
-  --docker-dir        "$DOCKER_DIR" \
-  --gateway-port      "$GATEWAY_PORT" \
-  --memory-limit      "$MEMORY_LIMIT" \
-  --central-db-network "$CENTRAL_DB_NETWORK" \
-  --php-versions      "$PHP_VERS_ARG" \
-  --composer-versions "$COMP_VERS_ARG" \
-  --vhost-dir         "$DOCKER_DIR/vhosts" \
-  --output-dir        "$PROJECT_PATH"
-
 cp "$TEMPLATE_DIR/Dockerfile" "$DOCKER_DIR/Dockerfile"
 [[ -f "$TEMPLATE_DIR/.dockerignore" ]] && cp "$TEMPLATE_DIR/.dockerignore" "$PROJECT_PATH/.dockerignore"
 
-# ── Generate vhost per-service dengan document root yang sudah ter-resolve ──
-VHOST_DIR="$DOCKER_DIR/vhosts"
-mkdir -p "$VHOST_DIR"
-SVC_DOC_ROOTS_ARG=""
-for svc_name in "${SVC_NAMES[@]}"; do
-  svc_path="${SVC_PATHS[$svc_name]}"
-  runtime_meta="$svc_path/.ladock-runtime.json"
-  doc_root="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("document_root", "/var/www"))' "$runtime_meta" 2>/dev/null || echo '/var/www')"
-  vhost_file="$VHOST_DIR/${svc_name}.conf"
-  sed -e "s|__PROJECT__|${PROJECT_NAME}_${svc_name}|g" \
-      -e "s|__DOCUMENT_ROOT__|${doc_root}|g" \
-      "$TEMPLATE_DIR/apache-vhost.conf.tpl" > "$vhost_file"
-  [[ -n "$SVC_DOC_ROOTS_ARG" ]] && SVC_DOC_ROOTS_ARG+=","
-  SVC_DOC_ROOTS_ARG+="${svc_name}:${doc_root}"
-done
-
-# Fallback: vhost generik (untuk kompatibilitas)
-sed -e "s/__PROJECT__/$PROJECT_NAME/g" \
-    -e 's|__DOCUMENT_ROOT__|/var/www|g' \
-    "$TEMPLATE_DIR/apache-vhost.conf.tpl" > "$DOCKER_DIR/apache-vhost.conf"
-
-GATEWAY_CONF_RAW="$(python3 "$SCRIPTS_DIR/generate_gateway_conf.py" \
-  --project "$PROJECT_NAME" \
-  --services "$SERVICES_ARG" \
-  --routes "$SVC_ROUTES_ARG" \
-  --container-ports "$CONTAINER_PORTS_ARG" \
-  --gateway-port "$GATEWAY_PORT")"
-
-echo "$GATEWAY_CONF_RAW" > "$DOCKER_DIR/apache-gateway.conf"
-cp "$TEMPLATE_DIR/gateway.Dockerfile" "$GATEWAY_DIR/Dockerfile"
-cp "$TEMPLATE_DIR/gateway-httpd.conf" "$GATEWAY_DIR/httpd.conf"
-
+# ── Konfigurasi Environment & Adaptasi Legacy per-Service ─────────────────────
 for svc_name in "${SVC_NAMES[@]}"; do
   svc_path="${SVC_PATHS[$svc_name]}"
 
@@ -1180,7 +1242,11 @@ for svc_name in "${SVC_NAMES[@]}"; do
   set_clean_env "$svc_path/.env" DB_USERNAME "${SVC_DB_USERS[$svc_name]}"
   set_clean_env "$svc_path/.env" DB_PASSWORD "${SVC_DB_PASSES[$svc_name]}"
   route_name="${SVC_ROUTE_NAMES[$svc_name]}"
-  set_clean_env "$svc_path/.env" APP_URL "http://localhost:${GATEWAY_PORT}/${route_name}"
+  if [[ $USE_GATEWAY -eq 1 ]]; then
+    set_clean_env "$svc_path/.env" APP_URL "http://localhost:${GATEWAY_PORT}/${route_name}"
+  else
+    set_clean_env "$svc_path/.env" APP_URL "http://localhost:${SVC_HTTP_PORTS[$svc_name]}"
+  fi
 
   if [[ -f "$svc_path/wp-config.php" ]]; then
     python3 "$SCRIPTS_DIR/update_wordpress_config.py" "$svc_path/wp-config.php"
@@ -1200,6 +1266,8 @@ for svc_name in "${SVC_NAMES[@]}"; do
     "$svc_path/lib/includes/database.php"; do
     if [[ -f "$legacy_db_config" ]]; then
       ADO_ARGS=(--config "$legacy_db_config" --env "$svc_path/.env")
+      legacy_path_config="$(dirname "$legacy_db_config")/path.php"
+      [[ -f "$legacy_path_config" ]] && ADO_ARGS+=(--path-config "$legacy_path_config")
       for adodb_driver in \
         "$(dirname "$legacy_db_config")/../adodb/drivers/adodb-mysqli.inc.php" \
         "$svc_path/public/lib/adodb/drivers/adodb-mysqli.inc.php" \
@@ -1226,6 +1294,60 @@ for svc_name in "${SVC_NAMES[@]}"; do
   fi
 done
 
+# ── Generate vhost per-service dengan document root yang sudah ter-resolve ──
+VHOST_DIR="$DOCKER_DIR/vhosts"
+mkdir -p "$VHOST_DIR"
+SVC_DOC_ROOTS_ARG=""
+for svc_name in "${SVC_NAMES[@]}"; do
+  svc_path="${SVC_PATHS[$svc_name]}"
+  runtime_meta="$svc_path/.ladock-runtime.json"
+  doc_root="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("document_root", "/var/www"))' "$runtime_meta" 2>/dev/null || echo '/var/www')"
+  vhost_file="$VHOST_DIR/${svc_name}.conf"
+  sed -e "s|__PROJECT__|${PROJECT_NAME}_${svc_name}|g" \
+      -e "s|__DOCUMENT_ROOT__|${doc_root}|g" \
+      "$TEMPLATE_DIR/apache-vhost.conf.tpl" > "$vhost_file"
+  [[ -n "$SVC_DOC_ROOTS_ARG" ]] && SVC_DOC_ROOTS_ARG+=","
+  SVC_DOC_ROOTS_ARG+="${svc_name}:${doc_root}"
+done
+
+# Fallback: vhost generik (untuk kompatibilitas)
+sed -e "s/__PROJECT__/$PROJECT_NAME/g" \
+    -e 's|__DOCUMENT_ROOT__|/var/www|g' \
+    "$TEMPLATE_DIR/apache-vhost.conf.tpl" > "$DOCKER_DIR/apache-vhost.conf"
+
+if [[ $USE_GATEWAY -eq 1 ]]; then
+  GATEWAY_CONF_RAW="$(python3 "$SCRIPTS_DIR/generate_gateway_conf.py" \
+    --project "$PROJECT_NAME" \
+    --services "$SERVICES_ARG" \
+    --routes "$SVC_ROUTES_ARG" \
+    --container-ports "$CONTAINER_PORTS_ARG" \
+    --gateway-port "$GATEWAY_PORT")"
+
+  echo "$GATEWAY_CONF_RAW" > "$DOCKER_DIR/apache-gateway.conf"
+  cp "$TEMPLATE_DIR/gateway.Dockerfile" "$GATEWAY_DIR/Dockerfile"
+  cp "$TEMPLATE_DIR/gateway-httpd.conf" "$GATEWAY_DIR/httpd.conf"
+fi
+
+log "Men-generate docker-compose-app.yml yang terhubung ke MySQL sentral..."
+GENERATE_COMPOSE_ARGS=(
+  --project           "$PROJECT_NAME"
+  --services          "$SERVICES_ARG"
+  --service-paths     "${SVC_PATHS_ARG:-}"
+  --docker-dir        "$DOCKER_DIR"
+  --memory-limit      "$MEMORY_LIMIT"
+  --central-db-network "$CENTRAL_DB_NETWORK"
+  --php-versions      "$PHP_VERS_ARG"
+  --composer-versions "$COMP_VERS_ARG"
+  --vhost-dir         "$DOCKER_DIR/vhosts"
+  --output-dir        "$PROJECT_PATH"
+)
+if [[ $USE_GATEWAY -eq 1 ]]; then
+  GENERATE_COMPOSE_ARGS+=(--gateway-port "$GATEWAY_PORT")
+else
+  GENERATE_COMPOSE_ARGS+=(--no-gateway)
+fi
+python3 "$SCRIPTS_DIR/generate_compose.py" "${GENERATE_COMPOSE_ARGS[@]}"
+
 log "Menjalankan stack microservices..."
 cd "$PROJECT_PATH"
 $DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" down --remove-orphans >/dev/null 2>&1 || true
@@ -1237,5 +1359,12 @@ fi
 $DC -f "$COMPOSE_APP_FILE" -p "${PROJECT_NAME}_app_stack" up -d --build --remove-orphans
 
 hr
-echo " ✓ MICROSERVICES LIVE — http://localhost:${GATEWAY_PORT}/"
+if [[ $USE_GATEWAY -eq 1 ]]; then
+  echo " ✓ MICROSERVICES LIVE — http://localhost:${GATEWAY_PORT}/"
+else
+  echo " ✓ SERVICES LIVE (Direct Access):"
+  for svc_name in "${SVC_NAMES[@]}"; do
+    echo "   • $svc_name : http://localhost:${SVC_HTTP_PORTS[$svc_name]}/"
+  done
+fi
 hr

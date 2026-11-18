@@ -2,6 +2,7 @@ from pathlib import Path
 
 from scripts.legacy_db_config import (
     clear_symfony1_cache,
+    disable_local_https_redirects,
     get_legacy_database_name,
     update_codeigniter_config,
     update_symfony1_config,
@@ -153,3 +154,25 @@ def test_symfony1_generated_cache_is_cleared_after_local_config_changes(tmp_path
     assert clear_symfony1_cache(tmp_path)
     assert not (tmp_path / "cache/backend").exists()
     assert not clear_symfony1_cache(tmp_path)
+
+
+def test_disables_hardcoded_https_redirect_in_entrypoint(tmp_path: Path):
+    index_file = tmp_path / "index.php"
+    index_file.write_text(
+        "<?php\n"
+        "if (empty($_SERVER['HTTPS']) || $_SERVER['HTTPS'] === \"off\") {\n"
+        "    $location = 'https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];\n"
+        "    header('HTTP/1.1 301 Moved Permanently');\n"
+        "    header('Location: ' . $location);\n"
+        "    exit;\n"
+        "}\n"
+        "header('Location: web');\n",
+        encoding="utf-8",
+    )
+
+    assert disable_local_https_redirects(tmp_path)
+    updated = index_file.read_text(encoding="utf-8")
+    assert "https://" not in updated
+    assert "header('Location: web');" in updated
+    assert not disable_local_https_redirects(tmp_path)
+

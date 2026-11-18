@@ -22,7 +22,7 @@ RUN (sed -i 's|http://deb.debian.org/debian-security|http://archive.debian.org/d
       libpng-dev libonig-dev libxml2-dev libzip-dev \
       libicu-dev \
  && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip intl \
- && a2enmod rewrite \
+ && a2enmod rewrite headers \
  && echo "ServerName localhost" >> /etc/apache2/apache2.conf \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 

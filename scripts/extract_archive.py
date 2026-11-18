@@ -359,11 +359,22 @@ def main():
     cpanel_multi_app_plan = find_cpanel_multi_app_plan(homedir) if is_cpanel else None
     if is_cpanel:
         log("-> Terdeteksi arsip cPanel (memiliki 'homedir').")
-        app_root = (
-            cpanel_multi_app_plan["web_root"]
-            if cpanel_multi_app_plan
-            else find_laravel_root(homedir) or find_general_app_root(homedir)
-        )
+        cpanel_pub = os.path.join(homedir, "public_html")
+        if not os.path.isdir(cpanel_pub):
+            cpanel_pub = os.path.join(homedir, "www")
+
+        if cpanel_multi_app_plan:
+            app_root = cpanel_multi_app_plan["web_root"]
+        else:
+            # Di cPanel, fokus utama adalah public_html
+            # Hanya gunakan split Laravel jika benar-benar ada Laravel root terpisah di luar public_html
+            laravel_root = find_laravel_root(homedir)
+            if laravel_root and detect_split_public(laravel_root, homedir):
+                app_root = laravel_root
+            elif os.path.isdir(cpanel_pub):
+                app_root = cpanel_pub
+            else:
+                app_root = laravel_root or find_general_app_root(homedir)
     else:
         app_root = find_laravel_root(tmp_dir) or find_general_app_root(tmp_dir)
 
@@ -387,6 +398,30 @@ def main():
     else:
         shutil.copytree(app_root, output_dir)
     log(f"-> Aplikasi disalin ke: {output_dir}")
+
+    # Simpan metadata cPanel jika ada untuk analisis service usage
+    if is_cpanel:
+        meta_dir = os.path.join(output_dir, ".cpanel_metadata")
+        userdata_dir = find_dir_named(tmp_dir, "userdata")
+        if userdata_dir and os.path.isdir(userdata_dir):
+            shutil.copytree(userdata_dir, os.path.join(meta_dir, "userdata"), dirs_exist_ok=True)
+            log("-> Metadata cPanel (userdata) disimpan ke .cpanel_metadata/")
+        bandwidth_dir = find_dir_named(tmp_dir, "bandwidth")
+        if bandwidth_dir and os.path.isdir(bandwidth_dir):
+            shutil.copytree(bandwidth_dir, os.path.join(meta_dir, "bandwidth"), dirs_exist_ok=True)
+        for root_scan, _, files_scan in os.walk(tmp_dir):
+            if "homedir" in root_scan and "public_html" in root_scan:
+                continue
+            for fn in files_scan:
+                if "bandwidth" in fn.lower():
+                    src_bw = os.path.join(root_scan, fn)
+                    dst_bw = os.path.join(meta_dir, fn)
+                    os.makedirs(meta_dir, exist_ok=True)
+                    if not os.path.exists(dst_bw):
+                        try:
+                            shutil.copy2(src_bw, dst_bw)
+                        except OSError:
+                            pass
 
     # Jika cPanel, gabungkan split public_html jika ada
     if is_cpanel and homedir and not cpanel_multi_app_plan:

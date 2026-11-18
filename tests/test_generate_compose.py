@@ -144,3 +144,26 @@ def test_root_web_service_can_use_the_requested_direct_port(tmp_path):
 
     assert "container_name: imunisasijtm_root_web_app" in compose
     assert '"8085:80"' in compose
+
+
+def test_no_gateway_omits_gateway_container_and_route_mounts():
+    services = [
+        {"name": "web", "http_port": 8081},
+        {"name": "api", "http_port": 8082},
+    ]
+    compose = build_app_compose(
+        project="sample",
+        services=services,
+        php_versions={},
+        composer_versions={},
+        no_gateway=True,
+    )
+
+    assert "gateway_sample:" not in compose
+    assert "sample_gateway" not in compose
+    assert "apache-gateway.conf" not in compose
+    assert compose.count("mem_limit: 512M") == len(services)
+    assert "app_web:" in compose
+    assert "app_api:" in compose
+    assert "networks:" in compose
+

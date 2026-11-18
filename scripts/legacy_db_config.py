@@ -214,6 +214,25 @@ def update_symfony1_config(config_path: Path, env_path: Path) -> bool:
     return False
 
 
+def disable_local_https_redirects(service_dir: Path) -> bool:
+    """Disable hardcoded HTTPS redirects in root index.php or entrypoints for local HTTP deployment."""
+    changed = False
+    pattern = re.compile(
+        r"if\s*\([^;{}]*\bHTTPS\b[^;{}]*\)\s*\{[^}]*?(?:Location|\$location|https).*?\}",
+        re.DOTALL | re.IGNORECASE,
+    )
+    for candidate in [service_dir / "index.php", service_dir / "web/index.php", service_dir / "public/index.php"]:
+        if not candidate.is_file():
+            continue
+        content = candidate.read_text(encoding="utf-8", errors="ignore")
+        if "HTTPS" in content and ("Location" in content or "location" in content or "https" in content):
+            updated = pattern.sub("// [LaDock] HTTPS redirect disabled for local HTTP deployment", content)
+            if updated != content:
+                candidate.write_text(updated, encoding="utf-8")
+                changed = True
+    return changed
+
+
 def update_symfony1_local_security(service_dir: Path) -> bool:
     """Allow HTTP only for the app-specific Symfony 1 configs in a local deployment."""
     app_dir = service_dir / "apps"
@@ -314,6 +333,7 @@ def main() -> None:
             changed = update_symfony1_config(symfony_config, args.env) or changed
         if args.allow_http:
             changed = update_symfony1_local_security(service_dir) or changed
+            changed = disable_local_https_redirects(service_dir) or changed
             changed = update_symfony1_user_group_compatibility(service_dir) or changed
             changed = clear_symfony1_cache(service_dir) or changed
     except (OSError, ValueError) as exc:

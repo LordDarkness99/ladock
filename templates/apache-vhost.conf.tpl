@@ -8,6 +8,12 @@
         Require all granted
     </Directory>
 
+    # Pastikan browser tidak mengunci localhost ke HTTPS via HSTS
+    <IfModule mod_headers.c>
+        Header always unset Strict-Transport-Security
+        Header unset Strict-Transport-Security
+    </IfModule>
+
     ErrorLog ${APACHE_LOG_DIR}/__PROJECT___error.log
     CustomLog ${APACHE_LOG_DIR}/__PROJECT___access.log combined
 </VirtualHost>

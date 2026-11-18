@@ -6,6 +6,7 @@ from scripts.update_adodb_config import (
     update_adodb_config,
     update_adodb_mysqli_driver,
     update_legacy_app_registry,
+    update_legacy_path_config,
     update_php_curly_offsets,
     update_php4_constructors,
     update_pattemplate_constructor,
@@ -182,3 +183,21 @@ def test_initializes_legacy_global_app_registry_for_php8(tmp_path: Path):
     assert "global $app;" in patched
     assert "$app = new stdClass();" in patched
     assert not update_legacy_app_registry(registry_file)
+
+
+def test_updates_legacy_path_config_from_env_app_url(tmp_path: Path):
+    path_file = tmp_path / "path.php"
+    path_file.write_text(
+        "<?php\n"
+        "define('PATH', '');\n"
+        "define('BASE_URL', 'http://imunisasi.dinkes.jatimprov.go.id'.PATH);\n",
+        encoding="utf-8",
+    )
+    env_file = tmp_path / ".env"
+    env_file.write_text('APP_URL="http://localhost:8081"\n', encoding="utf-8")
+
+    assert update_legacy_path_config(path_file, env_file)
+    updated = path_file.read_text(encoding="utf-8")
+    assert "getenv('APP_URL')" in updated
+    assert not update_legacy_path_config(path_file, env_file)
+
