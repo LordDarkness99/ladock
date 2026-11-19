@@ -260,32 +260,104 @@ def detect_split_public(laravel_root: str, homedir: str):
     return None
 
 
+def fix_split_laravel_paths(output_dir: str, laravel_root_name: str = None):
+    """
+    Perbaiki path relatif pada public/index.php dan bootstrap/paths.php
+    akibat normalisasi split directory cPanel (misal homedir/web_app + homedir/public_html).
+    """
+    public_dir = os.path.join(output_dir, "public")
+    index_php = os.path.join(public_dir, "index.php")
+
+    if os.path.isfile(index_php):
+        try:
+            with open(index_php, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            original = content
+
+            # 1. Normalisasi path ../<laravel_root_name>/... -> ../...
+            if laravel_root_name:
+                content = re.sub(
+                    r"(__DIR__\s*\.\s*['\"]/\.\./)" + re.escape(laravel_root_name) + r"/",
+                    r"\1",
+                    content,
+                )
+                content = re.sub(
+                    r"(dirname\s*\(\s*__DIR__\s*\)\s*\.\s*['\"]/)" + re.escape(laravel_root_name) + r"/",
+                    r"\1",
+                    content,
+                )
+
+            # 2. Pola umum cPanel: require __DIR__.'/../<folder>/(bootstrap|vendor)/...'
+            content = re.sub(
+                r"(__DIR__\s*\.\s*['\"]/\.\./)[^/'\"]+/(bootstrap/|vendor/|storage/)",
+                r"\1\2",
+                content,
+            )
+            content = re.sub(
+                r"(dirname\s*\(\s*__DIR__\s*\)\s*\.\s*['\"]/)[^/'\"]+/(bootstrap/|vendor/|storage/)",
+                r"\1\2",
+                content,
+            )
+
+            # 3. Path absolut /home/<user>/.../bootstrap atau vendor
+            content = re.sub(
+                r"['\"]/home/[^/'\"]+/[^/'\"]+/(bootstrap/[^'\"]+)['\"]",
+                r"__DIR__.'/../\1'",
+                content,
+            )
+            content = re.sub(
+                r"['\"]/home/[^/'\"]+/[^/'\"]+/(vendor/[^'\"]+)['\"]",
+                r"__DIR__.'/../\1'",
+                content,
+            )
+
+            # 4. Jika ada malware/obfuscation base64_decode atau symlink ke repositories cPanel
+            if re.search(r"repositories/|\.\./\.\./[^'\"]*?/vendor/autoload\.php|base64_decode\s*\(", content):
+                if not os.path.isfile(os.path.join(output_dir, "bootstrap", "start.php")):
+                    content = STANDARD_INDEX_PHP
+
+            if content != original:
+                try:
+                    shutil.copy2(index_php, index_php + ".orig")
+                except OSError:
+                    pass
+                with open(index_php, "w", encoding="utf-8") as f:
+                    f.write(content)
+                log("-> public/index.php dinormalisasi: path split cPanel diperbaiki.")
+        except OSError as e:
+            log(f"⚠️  Gagal membaca/menulis {index_php}: {e}")
+
+    # Perbaiki bootstrap/paths.php (Laravel 4.x)
+    paths_php = os.path.join(output_dir, "bootstrap", "paths.php")
+    if os.path.isfile(paths_php):
+        try:
+            with open(paths_php, "r", encoding="utf-8", errors="ignore") as f:
+                paths_content = f.read()
+            original_paths = paths_content
+
+            # Di cPanel, public path sering diset ke __DIR__.'/../../public_html'
+            paths_content = re.sub(
+                r"(['\"]public['\"]\s*=>\s*__DIR__\s*\.\s*['\"])/[^'\"]*public_html(['\"])",
+                r"\1/../public\2",
+                paths_content,
+            )
+
+            if paths_content != original_paths:
+                try:
+                    shutil.copy2(paths_php, paths_php + ".orig")
+                except OSError:
+                    pass
+                with open(paths_php, "w", encoding="utf-8") as f:
+                    f.write(paths_content)
+                log("-> bootstrap/paths.php dinormalisasi: path public_html diarahkan ke public.")
+        except OSError as e:
+            log(f"⚠️  Gagal membaca/menulis {paths_php}: {e}")
+
+
 def fix_public_index_php(public_dir: str):
     """Perbaiki path public/index.php jika masih menggunakan konfigurasi cPanel."""
-    index_php = os.path.join(public_dir, "index.php")
-    if not os.path.isfile(index_php):
-        return
-    try:
-        with open(index_php, "r", encoding="utf-8", errors="ignore") as f:
-            original = f.read()
-    except OSError:
-        return
-
-    needs_fix = bool(re.search(
-        r"repositories/|\.\./\.\./[^'\"]*?/vendor/autoload\.php|base64_decode\s*\(",
-        original,
-    ))
-    if not needs_fix:
-        return
-
-    try:
-        shutil.copy2(index_php, index_php + ".orig")
-    except OSError:
-        pass
-
-    with open(index_php, "w", encoding="utf-8") as f:
-        f.write(STANDARD_INDEX_PHP)
-    log("-> public/index.php dinormalisasi ke template standar.")
+    output_dir = os.path.dirname(os.path.abspath(public_dir))
+    fix_split_laravel_paths(output_dir)
 
 
 def clean_laravel_cache(output_dir: str):
@@ -450,7 +522,7 @@ def main():
                                 shutil.copy2(src_f, dst_f)
                             except OSError:
                                 pass
-            fix_public_index_php(output_public)
+            fix_split_laravel_paths(output_dir, os.path.basename(laravel_root) if laravel_root else None)
 
     # Bersihkan cache Laravel jika ada
     if not cpanel_multi_app_plan:

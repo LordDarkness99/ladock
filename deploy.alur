@@ -1,0 +1,235 @@
+ALUR DEPLOY.SH - LaDock
+=======================
+
+Format file ini: diagram teks/ASCII. Sumber utama: deploy.sh dan scripts yang
+dipanggilnya. Nilai port, runtime, dan lokasi mengikuti konfigurasi/argumen.
+
+
+1. MULAI
+--------
+
+Mulai deploy.sh
+  |
+  +--> Aktifkan strict mode Bash (set -euo pipefail) dan trap error
+  |
+  +--> Baca .ladock_db.env dan config.json (jika tersedia)
+  |      Defaults: deploy root, port, dan batas memori
+  |
+  +--> Parse argumen
+  |      Input: folder project atau arsip
+  |      Opsi: mode, port, dump DB, replace, gateway, service filter, dll.
+  |
+  +--> Validasi batas memori
+  |
+  +--> Pastikan Python 3 dan Docker Compose tersedia
+  |
+  +--> Apakah input berupa arsip?
+         |
+         +-- TIDAK --> Gunakan folder project dari argumen
+         |              Jika kosong, cari project di direktori saat ini
+         |
+         +-- YA -----> Tentukan folder tujuan dan slug project
+                        |
+                        +--> Ambil lock project; cegah deploy duplikat
+                        |
+                        +--> Sudah ada deployment?
+                        |      |
+                        |      +-- replace --> Backup source dan dump lama;
+                        |      |                snapshot DB aktif bila tersedia
+                        |      +-- biasa ----> Tolak jika target sudah ada
+                        |
+                        +--> extract_archive.py:
+                               validasi dan ekstrak ke folder sementara
+                               lalu pilih dan salin source ke folder tujuan
+                               simpan dump SQL dan metadata cPanel
+                               |
+                               +--> Gagal ekstraksi? Pulihkan backup bila ada,
+                               |    lalu berhenti
+                               +--> Berhasil? PROJECT_PATH = folder hasil ekstrak
+
+
+2. SUBALUR EKSTRAKSI ARSIP cPANEL
+---------------------------------
+
+Ekstrak arsip
+  |
+  +--> Cari direktori "homedir"
+  |      Tidak ditemukan: cari root Laravel / aplikasi umum dalam arsip
+  |
+  +--> "homedir" ditemukan
+         |
+         +--> Cari public_html; jika tidak ada, coba www
+         |
+         +--> Apakah webroot berisi aplikasi utama PHP legacy dan aplikasi
+         |    terpisah di dalamnya?
+         |      |
+         |      +-- YA --> Siapkan multi-app:
+         |      |            webroot utama -> apps/root_web
+         |      |            aplikasi anak -> apps/<nama_service>
+         |      |
+         |      +-- TIDAK -> Cari root Laravel di homedir:
+         |                   artisan + composer.json + bootstrap
+         |                   |
+         |                   +--> public_html/index.php menunjuk ke root
+         |                   |    Laravel di luar public_html?
+         |                   |      |
+         |                   |      +-- YA --> Source = root Laravel;
+         |                   |      |            public_html digabung ke
+         |                   |      |            source/public
+         |                   |      |
+         |                   |      +-- TIDAK --> Source = public_html/www
+         |                   |                   jika tersedia; jika tidak,
+         |                   |                   gunakan root Laravel atau
+         |                   |                   aplikasi umum
+         |                   |
+         |                   +--> Normalisasi path index.php dan path Laravel
+         |
+         +--> Salin userdata/bandwidth cPanel bila ditemukan
+         +--> Temukan dump .sql; urutkan terbesar dahulu
+         +--> Dump terbesar disalin sebagai data.sql; dump lain disimpan
+         +--> Hapus folder sementara
+
+Catatan perilaku split public_html:
+  - Jika source/public belum ada, public_html disalin ke source/public.
+  - Jika source/public sudah ada, file public_html hanya mengisi file yang
+    belum ada atau berukuran nol; file tujuan lain tidak ditimpa.
+
+Contoh pada logs/deploy_1791720642788.log:
+  homedir/repositories terpilih sebagai source Laravel, lalu public_html
+  digabung ke uploads/jatimfair2022/public. Ini adalah jalur split webroot,
+  bukan jalur multi-app.
+
+
+3. PILIH MODE DEPLOY
+--------------------
+
+PROJECT_PATH tersedia
+  |
+  +--> Jalankan find_microservices.py (kecuali mode dipaksa monolith)
+  |
+  +--> Mode ditentukan eksplisit?
+         |
+         +-- YA --> Pakai mode dari --mode
+         |
+         +-- TIDAK --> Jumlah service terdeteksi >= 2?
+                        |
+                        +-- YA --> MICROSERVICE
+                        +-- TIDAK --> MONOLITH
+  |
+  +--> Normalisasi nama project menjadi slug
+  |
+  +--> --check-only?
+         |
+         +-- YA --> Jalankan pemeriksaan penggunaan service, tampilkan laporan,
+         |          lalu selesai tanpa membangun aplikasi
+         |
+         +-- TIDAK --> Lanjutkan deploy
+  |
+  +--> Jika bukan arsip, cek duplikasi dan ambil lock project
+  |
+  +--> Masuk ke cabang MONOLITH atau MICROSERVICE
+
+
+4. CABANG MONOLITH
+------------------
+
+MONOLITH
+  |
+  +--> Hentikan container aplikasi lama yang namanya cocok
+  +--> Pilih port HTTP kosong (port DB dikecualikan)
+  +--> Tentukan docker/apps/<project>
+  |      Jika ada deployment legacy dan target baru belum ada, pindahkan
+  |      deployment legacy
+  |
+  +--> Salin source ke target bila perlu
+  +--> Pastikan source berada di <project>/src
+  +--> Buat .env bila belum tersedia
+  +--> Deteksi stack/runtime/dependensi -> stack.json dan metadata runtime
+  |
+  +--> Siapkan MySQL sentral
+  +--> Baca kredensial DB dari .env / kredensial tersimpan
+  |      Buat nilai yang belum ada dan simpan kredensial deployment
+  +--> Siapkan Dockerfile, Apache vhost, dan docker-compose.yml
+  +--> Atur .env aplikasi agar menggunakan MySQL sentral
+  +--> Adaptasi konfigurasi legacy dan normalisasi URL aset bila relevan
+  +--> Buat database dan user aplikasi di MySQL sentral
+  +--> docker compose up -d --build
+  |
+  +--> Perlu import dump?
+  |      Kondisi: bukan --skip-import DAN salah satu:
+  |        - deployment baru
+  |        - --force-import
+  |        - database kosong
+  |        - --dump diberikan
+  |      |
+  |      +-- YA --> Jalankan db_import.py, lalu simpan dump dokumentasi
+  |      +-- TIDAK --> Lewati import
+  |
+  +--> Untuk PHP/Laravel:
+  |      siapkan Composer, bersihkan cache, buat APP_KEY jika belum ada,
+  |      jalankan migrate dan storage:link
+  |
+  +--> Tampilkan URL, port, lokasi source, dan status akhir
+
+
+5. CABANG MICROSERVICE
+----------------------
+
+MICROSERVICE
+  |
+  +--> Ambil daftar service dan path dari hasil scanner
+  +--> Jalankan check_service_usage.py
+  |      Memakai entrypoint, metadata domain cPanel, traffic, dump DB,
+  |      nama folder, dan artefak arsip sebagai sinyal penggunaan
+  |
+  +--> --check-only? --> Tampilkan laporan dan selesai
+  |
+  +--> --all-services?
+  |      |
+  |      +-- YA --> Deploy semua service terdeteksi
+  |      +-- TIDAK --> Filter service tidak aktif; hormati include/exclude
+  |
+  +--> Tidak ada service tersisa? --> Berhenti dengan error
+  +--> Letakkan source terpilih di docker/apps/<project>/apps/<service>
+  +--> Tempatkan root_web terlebih dahulu bila ada
+  +--> Pilih port kosong per service
+  |      --with-gateway: pilih port gateway dan port langsung service
+  |      tanpa gateway: pilih port langsung untuk setiap service
+  +--> Deteksi stack/runtime dan port container per service
+  +--> Siapkan kredensial DB terpisah untuk setiap service
+  +--> Jalankan MySQL sentral; buat database dan user setiap service
+  +--> Jika dump DB legacy tersedia dan database service belum berisi tabel,
+  |    import dump tersebut
+  +--> Perbarui .env dan konfigurasi aplikasi/legacy
+  +--> Generate vhost; generate gateway config jika gateway aktif
+  +--> Generate docker-compose-app.yml
+  +--> docker compose up -d --build
+  +--> Tampilkan URL gateway atau URL langsung tiap service
+
+
+6. PENANGANAN ERROR
+-------------------
+
+Operasi utama yang gagal saat strict mode aktif akan menghentikan script dan
+menampilkan nomor baris melalui trap. Beberapa operasi pemeliharaan tertentu
+secara eksplisit memakai "|| true", sehingga kegagalannya tidak selalu
+menghentikan deployment. Pesan status akhir perlu dibaca bersama log build,
+import database, dan setup framework.
+
+
+RUTE DEPLOY PADA LOG YANG DIBAHAS
+---------------------------------
+
+Arsip cPanel
+  -> ekstraksi dan deteksi split public_html
+  -> source Laravel di homedir/repositories
+  -> public_html digabung ke source/public
+  -> deteksi stack: PHP 8.0 / Laravel / Apache
+  -> mode MONOLITH
+  -> setup MySQL sentral dan file Compose
+  -> build/start container aplikasi pada port 8083
+  -> proses import dump dan setup Laravel
+  -> tampilkan status akhir deployment
+
+Periksa error import dump secara terpisah: pesan status akhir aplikasi tidak
+menjamin bahwa setiap file SQL berhasil diimpor.

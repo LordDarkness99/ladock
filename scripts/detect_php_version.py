@@ -33,6 +33,26 @@ def detect(composer_path: str) -> str:
         or (data.get("require-dev") or {}).get("php")
     )
     if not constraint:
+        laravel_ver = str((data.get("require") or {}).get("laravel/framework", ""))
+        if laravel_ver:
+            match = re.search(r"(\d+)(?:\.(\d+))?", laravel_ver)
+            if match:
+                major = int(match.group(1))
+                minor = int(match.group(2)) if match.group(2) else 0
+                if major < 5:
+                    return "5.6"
+                elif major == 5:
+                    return "7.1" if minor < 5 else "7.4"
+                elif major in [6, 7, 8]:
+                    return "7.4"
+                elif major == 9:
+                    return "8.1"
+                elif major == 10:
+                    return "8.2"
+                elif major == 11:
+                    return "8.2"
+                elif major >= 12:
+                    return "8.3"
         return DEFAULT
 
     # 1) Kalau versi persis (mis. "8.2", "7.4") langsung tersebut di constraint, pakai itu

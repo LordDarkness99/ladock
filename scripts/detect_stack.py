@@ -276,6 +276,50 @@ def detect_php_version_from_composer(composer_data):
     return "8.2"
 
 
+def _detect_laravel_version(app_path: Path, composer_data: dict) -> str:
+    req_ver = composer_data.get("require", {}).get("laravel/framework", "")
+    if req_ver:
+        return req_ver
+    lock_file = app_path / "composer.lock"
+    if lock_file.is_file():
+        lock_data = read_json_file(lock_file)
+        for pkg in lock_data.get("packages", []):
+            if pkg.get("name") == "laravel/framework":
+                return pkg.get("version", "").lstrip("v")
+    app_file = app_path / "vendor" / "laravel" / "framework" / "src" / "Illuminate" / "Foundation" / "Application.php"
+    if app_file.is_file():
+        content = read_text_file(app_file)
+        match = re.search(r"const\s+VERSION\s*=\s*['\"]([^'\"]+)['\"]", content)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _laravel_compatible_php(version_str: str) -> str:
+    match = re.search(r"(\d+)(?:\.(\d+))?", version_str)
+    if not match:
+        return "8.2"
+    major = int(match.group(1))
+    minor = int(match.group(2)) if match.group(2) else 0
+    if major < 5:
+        return "5.6"
+    elif major == 5:
+        if minor < 5:
+            return "7.1"
+        return "7.4"
+    elif major in [6, 7, 8]:
+        return "7.4"
+    elif major == 9:
+        return "8.1"
+    elif major == 10:
+        return "8.2"
+    elif major == 11:
+        return "8.2"
+    elif major >= 12:
+        return "8.3"
+    return "8.2"
+
+
 def _legacy_framework_version(app_path: Path, framework: str) -> str:
     if framework == "WordPress":
         content = read_text_file(app_path / "wp-includes" / "version.php")
@@ -416,8 +460,7 @@ def detect_stack(app_dir: str) -> dict:
         if has_artisan or "laravel/framework" in composer_data.get("require", {}):
             stack["framework"] = "Laravel"
             stack["entrypoint"] = "public/index.php"
-            # Versi Laravel
-            req_ver = composer_data.get("require", {}).get("laravel/framework", "")
+            req_ver = _detect_laravel_version(app_path, composer_data)
             if req_ver:
                 stack["framework_version"] = req_ver
         elif (app_path / "wp-config.php").is_file() or (app_path / "wp-settings.php").is_file():
@@ -440,25 +483,36 @@ def detect_stack(app_dir: str) -> dict:
             stack["entrypoint"] = "public/index.php" if (app_path / "public" / "index.php").is_file() else "index.php"
 
         framework = stack["framework"]
-        framework_version = _legacy_framework_version(app_path, framework)
-        if framework_version:
-            stack["framework_version"] = framework_version
+        if framework != "Laravel":
+            framework_version = _legacy_framework_version(app_path, framework)
+            if framework_version:
+                stack["framework_version"] = framework_version
+        else:
+            framework_version = stack["framework_version"]
+
         is_legacy_native_php = (
             framework == "Native PHP"
             and (app_path / "lib" / "includes" / "path.php").is_file()
             and (app_path / "system" / "back-end" / "main.php").is_file()
         )
-        if (
-            stack["runtime_version_source"] == "detector_default"
-            and (framework_version or is_legacy_native_php)
-        ):
-            stack["runtime_version"] = "7.4"
-            stack["runtime_version_source"] = "legacy_compatibility"
-            stack["runtime_version_constraint"] = (
-                f"{framework} {framework_version}".strip()
-                if framework_version
-                else "legacy native PHP application"
-            )
+
+        if stack["runtime_version_source"] == "detector_default":
+            if framework == "Laravel" and framework_version and framework_version != "Unknown":
+                target_php = _laravel_compatible_php(framework_version)
+                stack["runtime_version"] = target_php
+                stack["runtime_version_source"] = "framework_compatibility"
+                stack["runtime_version_constraint"] = f"Laravel {framework_version}"
+                if target_php == "5.6" and "mcrypt" not in stack["php_extensions"]:
+                    stack["php_extensions"].append("mcrypt")
+                    stack["php_extensions"].sort()
+            elif framework_version and framework_version != "Unknown":
+                stack["runtime_version"] = "7.4"
+                stack["runtime_version_source"] = "legacy_compatibility"
+                stack["runtime_version_constraint"] = f"{framework} {framework_version}"
+            elif is_legacy_native_php:
+                stack["runtime_version"] = "7.4"
+                stack["runtime_version_source"] = "legacy_compatibility"
+                stack["runtime_version_constraint"] = "legacy native PHP application"
 
     # B. NODE.JS STACK (jika bukan PHP atau Node merupakan primary)
     elif docker_language == "Node.js" or (

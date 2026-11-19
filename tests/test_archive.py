@@ -19,7 +19,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.extract_archive import validate_and_extract_zip, is_safe_path
+from scripts.extract_archive import validate_and_extract_zip, is_safe_path, fix_split_laravel_paths
 
 
 class TestArchiveExtraction(unittest.TestCase):
@@ -74,6 +74,45 @@ class TestArchiveExtraction(unittest.TestCase):
         # safe_file should be extracted, evil_file must NOT be extracted outside dest
         self.assertTrue(os.path.isfile(os.path.join(dest, "safe_file.txt")))
         self.assertFalse(os.path.isfile(os.path.join(self.test_dir, "evil_file.txt")))
+
+    def test_fix_split_laravel_paths(self):
+        proj_dir = os.path.join(self.test_dir, "split_proj")
+        pub_dir = os.path.join(proj_dir, "public")
+        boot_dir = os.path.join(proj_dir, "bootstrap")
+        os.makedirs(pub_dir, exist_ok=True)
+        os.makedirs(boot_dir, exist_ok=True)
+
+        index_php = os.path.join(pub_dir, "index.php")
+        with open(index_php, "w") as f:
+            f.write(
+                "<?php\n"
+                "require __DIR__.'/../web_app/bootstrap/autoload.php';\n"
+                "$app = require_once __DIR__.'/../web_app/bootstrap/start.php';\n"
+                "$app->run();\n"
+            )
+
+        paths_php = os.path.join(boot_dir, "paths.php")
+        with open(paths_php, "w") as f:
+            f.write(
+                "<?php\n"
+                "return array(\n"
+                "    'app' => __DIR__.'/../app',\n"
+                "    'public' => __DIR__.'/../../public_html',\n"
+                ");\n"
+            )
+
+        fix_split_laravel_paths(proj_dir, "web_app")
+
+        with open(index_php, "r") as f:
+            new_index = f.read()
+        self.assertIn("require __DIR__.'/../bootstrap/autoload.php';", new_index)
+        self.assertIn("require_once __DIR__.'/../bootstrap/start.php';", new_index)
+        self.assertNotIn("web_app", new_index)
+
+        with open(paths_php, "r") as f:
+            new_paths = f.read()
+        self.assertIn("'public' => __DIR__.'/../public'", new_paths)
+        self.assertNotIn("public_html", new_paths)
 
 
 if __name__ == "__main__":

@@ -574,11 +574,8 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
     PHP_VERSION="$PHP_VERSION_PARAM"
   fi
 
-  if [[ "$(printf '%s\n' "$PHP_VERSION" "7.2" | sort -V | head -n1)" == "$PHP_VERSION" && "$PHP_VERSION" != "7.2" ]]; then
-    COMPOSER_VERSION=1
-  else
-    COMPOSER_VERSION=2
-  fi
+  # Default ke Composer 2 yang sudah ter-cache di local docker
+  COMPOSER_VERSION=2
 
   hr
   echo " Mode          : MONOLITH (Clean Structure)"
@@ -730,6 +727,11 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
       python3 "$SCRIPTS_DIR/update_adodb_config.py" "${ADO_ARGS[@]}"
     fi
   done
+
+  python3 "$SCRIPTS_DIR/legacy_db_config.py" adapt \
+    --service-dir "$SRC_DIR" \
+    --env "$SRC_DIR/.env" \
+    --allow-http >/dev/null 2>&1 || true
 
   # ── Normalisasi Asset & URL Template ──────────────────────────────────────
   if [[ "$STACK_LANGUAGE" == "PHP" && -f "$SCRIPTS_DIR/normalize_assets.py" ]]; then
@@ -1058,11 +1060,7 @@ for svc_name in "${SVC_NAMES[@]}"; do
   fi
   SVC_PHP_VERSIONS["$svc_name"]="$php_ver"
 
-  if [[ "$(printf '%s\n' "$php_ver" "7.2" | sort -V | head -n1)" == "$php_ver" && "$php_ver" != "7.2" ]]; then
-    SVC_COMPOSER_VERSIONS["$svc_name"]=1
-  else
-    SVC_COMPOSER_VERSIONS["$svc_name"]=2
-  fi
+  SVC_COMPOSER_VERSIONS["$svc_name"]=2
 done
 
 hr

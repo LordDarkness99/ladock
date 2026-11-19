@@ -85,6 +85,13 @@ def get_legacy_database_name(service_dir: Path) -> str:
         if name:
             return name
 
+    laravel4_config = service_dir / "app/config/database.php"
+    if laravel4_config.is_file():
+        content = laravel4_config.read_text(encoding="utf-8", errors="ignore")
+        match = re.search(r"['\"]database['\"]\s*=>\s*['\"]([^'\"]+)['\"]", content)
+        if match:
+            return match.group(1).strip()
+
     symfony_config = service_dir / "config/databases.yml"
     if symfony_config.is_file():
         dsn = _symfony_dsn(symfony_config)
@@ -154,6 +161,45 @@ def update_codeigniter_config(service_dir: Path) -> bool:
     if updated != content:
         config_path.write_text(updated, encoding="utf-8")
         changed = True
+    return changed
+
+
+def update_laravel4_config(service_dir: Path, env_path: Path) -> bool:
+    env_values = read_env_file(env_path)
+    required = ("DB_HOST", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD")
+    missing = [key for key in required if not env_values.get(key)]
+    if missing:
+        return False
+
+    config_dir = service_dir / "app/config"
+    if not config_dir.is_dir():
+        return False
+
+    changed = False
+    for config_path in config_dir.glob("**/database.php"):
+        content = config_path.read_text(encoding="utf-8", errors="ignore")
+        original = content
+
+        def repl_mysql_block(match):
+            block = match.group(0)
+            block = re.sub(r"(['\"]host['\"]\s*=>\s*)(['\"][^'\"]*['\"]|getenv\([^)]+\))", rf"\1{json.dumps(env_values['DB_HOST'])}", block)
+            block = re.sub(r"(['\"]database['\"]\s*=>\s*)(['\"][^'\"]*['\"]|getenv\([^)]+\))", rf"\1{json.dumps(env_values['DB_DATABASE'])}", block)
+            block = re.sub(r"(['\"]username['\"]\s*=>\s*)(['\"][^'\"]*['\"]|getenv\([^)]+\))", rf"\1{json.dumps(env_values['DB_USERNAME'])}", block)
+            block = re.sub(r"(['\"]password['\"]\s*=>\s*)(['\"][^'\"]*['\"]|getenv\([^)]+\))", rf"\1{json.dumps(env_values['DB_PASSWORD'])}", block)
+            if env_values.get("DB_PORT"):
+                if "'port'" in block or '"port"' in block:
+                    block = re.sub(r"(['\"]port['\"]\s*=>\s*)(['\"][^'\"]*['\"]|\d+|getenv\([^)]+\))", rf"\1{int(env_values['DB_PORT'])}", block)
+            return block
+
+        updated = re.sub(
+            r"['\"]mysql['\"]\s*=>\s*(?:array\s*\(|\[)[\s\S]*?(?:\)|\])",
+            repl_mysql_block,
+            content,
+        )
+
+        if updated != original:
+            config_path.write_text(updated, encoding="utf-8")
+            changed = True
     return changed
 
 
@@ -329,6 +375,8 @@ def main() -> None:
         changed = False
         if (service_dir / "application/config/database.php").is_file():
             changed = update_codeigniter_config(service_dir) or changed
+        if (service_dir / "app/config/database.php").is_file():
+            changed = update_laravel4_config(service_dir, args.env) or changed
         if symfony_config.is_file():
             changed = update_symfony1_config(symfony_config, args.env) or changed
         if args.allow_http:

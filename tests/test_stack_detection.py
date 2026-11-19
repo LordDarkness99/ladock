@@ -286,6 +286,34 @@ class TestStackDetection(unittest.TestCase):
         self.assertEqual(result["runtime_version"], "8.2")
         self.assertEqual(result["runtime_version_source"], "Dockerfile")
 
+    def test_laravel_version_compatibility_without_php_constraint(self):
+        cases = [
+            ("4.2.*", "5.6", True),
+            ("5.3.*", "7.1", False),
+            ("5.8.*", "7.4", False),
+            ("8.*", "7.4", False),
+            ("9.*", "8.1", False),
+            ("10.*", "8.2", False),
+            ("11.*", "8.2", False),
+        ]
+        for laravel_ver, expected_php, expects_mcrypt in cases:
+            with self.subTest(laravel_ver=laravel_ver):
+                app_path = Path(self.test_dir) / f"laravel_{laravel_ver.replace('*', 'x')}"
+                app_path.mkdir(parents=True, exist_ok=True)
+                (app_path / "artisan").write_text("#!/usr/bin/env php", encoding="utf-8")
+                (app_path / "composer.json").write_text(
+                    json.dumps({"require": {"laravel/framework": laravel_ver}}),
+                    encoding="utf-8",
+                )
+                res = detect_stack(str(app_path))
+                self.assertEqual(res["primary_language"], "PHP")
+                self.assertEqual(res["framework"], "Laravel")
+                self.assertEqual(res["framework_version"], laravel_ver)
+                self.assertEqual(res["runtime_version"], expected_php)
+                self.assertEqual(res["runtime_version_source"], "framework_compatibility")
+                if expects_mcrypt:
+                    self.assertIn("mcrypt", res["php_extensions"])
+
 
 if __name__ == "__main__":
     unittest.main()
