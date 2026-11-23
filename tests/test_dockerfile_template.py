@@ -13,6 +13,7 @@ def test_php_image_includes_mysqli_and_relies_on_compose_source_mounts():
     assert "RUN docker-php-ext-install mysqli" in dockerfile
     assert "COPY src/" not in dockerfile
     assert "./src:/var/www" in monolith_compose
+    assert "__CENTRAL_DB_NETWORK__" in monolith_compose
 
 
 def test_gateway_image_does_not_bundle_a_service_dashboard():
@@ -29,3 +30,13 @@ def test_gateway_image_does_not_bundle_a_service_dashboard():
     assert "TypesConfig conf/mime.types" in httpd_config
     assert "AddDefaultCharset UTF-8" in httpd_config
     assert "DirectoryIndex dashboard.html" not in httpd_config
+
+
+def test_central_mysql_uses_legacy_client_compatible_handshake_collation():
+    mysql_config = (ROOT / "templates" / "mysql-central.cnf").read_text(
+        encoding="utf-8"
+    )
+    central_db = (ROOT / "central_db.sh").read_text(encoding="utf-8")
+
+    assert "collation-server=utf8mb4_general_ci" in mysql_config
+    assert "SET GLOBAL collation_server = 'utf8mb4_general_ci'" in central_db

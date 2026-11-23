@@ -20,9 +20,9 @@ services:
     environment:
       APP_ENV: "local"
     networks:
-      - ladock_net
+      - __CENTRAL_DB_NETWORK__
 
 networks:
-  ladock_net:
-    name: ladock_net
+  __CENTRAL_DB_NETWORK__:
+    name: __CENTRAL_DB_NETWORK__
     external: true

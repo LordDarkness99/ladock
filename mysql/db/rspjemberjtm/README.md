@@ -4,11 +4,11 @@
 - **Host Container**: `ladock_mysql` (datadir lokal: `docker/db/ladock_mysql/data/`)
 - **Port Internal**: 3306
 - **Port Host**: 3310
-- **Last Backup**: Thu Nov 19 05:34:43 AM WIB 2026
+- **Last Backup**: Tue Nov 24 01:57:16 AM WIB 2026
 - **Files**:
   - `schema.sql` : Struktur tabel, routines, dan triggers
   - `data.sql`   : Dump lengkap data dan struktur terakhir
-  - `backup_20261119_053442.sql` : Snapshot arsip saat backup dijalankan
+  - `backup_20261124_015715.sql` : Snapshot arsip saat backup dijalankan
 
 ### Cara Restore Manual:
 ```bash

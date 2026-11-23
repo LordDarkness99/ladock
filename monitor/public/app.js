@@ -6,6 +6,21 @@ let activeDeployEventSource = null;
 let activeLogEventSource = null;
 let globalClusterData = null;
 
+function setDeployProgress(percent, label) {
+  const box = document.getElementById('deploy-progress');
+  const value = document.getElementById('deploy-progress-value');
+  const fill = document.getElementById('deploy-progress-fill');
+  const text = document.getElementById('deploy-progress-label');
+  const track = box?.querySelector('[role="progressbar"]');
+  if (!box || !value || !fill || !text) return;
+  const safePercent = Math.max(0, Math.min(100, Math.round(percent)));
+  box.hidden = false;
+  value.innerText = `${safePercent}%`;
+  text.innerText = label || 'Memproses deployment...';
+  fill.style.width = `${safePercent}%`;
+  if (track) track.setAttribute('aria-valuenow', String(safePercent));
+}
+
 // Tab Switching
 function switchTab(tabId) {
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
@@ -307,6 +322,7 @@ async function handleDeploySubmit(event) {
 
   const term = document.getElementById('deploy-live-terminal');
   term.innerText = `[${new Date().toLocaleTimeString()}] Memulai ${deployJobs.length} deployment secara berurutan...\n`;
+  setDeployProgress(0, 'Menyiapkan antrean deployment...');
   document.getElementById('btn-submit-deploy').disabled = true;
   showToast(`Memulai antrean ${deployJobs.length} deployment...`, 'info');
 
@@ -346,12 +362,19 @@ function startDeployStream(deployId, onComplete = null) {
   activeDeployEventSource = eventSource;
   let completed = false;
   let exitCode = null;
+  let batchCurrentJob = 0;
+  let batchTotalJobs = 0;
+  let latestDeployProgress = 0;
 
   const finish = (succeeded) => {
     if (completed) return;
     completed = true;
     eventSource.close();
     if (activeDeployEventSource === eventSource) activeDeployEventSource = null;
+    setDeployProgress(
+      succeeded ? 100 : latestDeployProgress,
+      succeeded ? 'Deployment selesai' : 'Deployment gagal atau terhenti'
+    );
 
     if (onComplete) {
       onComplete(succeeded);
@@ -367,13 +390,28 @@ function startDeployStream(deployId, onComplete = null) {
     try {
       const parsed = JSON.parse(event.data);
       if (parsed.message) {
+        const jobMatch = parsed.message.match(/\[(\d+)\/(\d+)\]/);
+        if (jobMatch) {
+          batchCurrentJob = Number(jobMatch[1]);
+          batchTotalJobs = Number(jobMatch[2]);
+        }
+        const progressMatch = parsed.message.match(/\[LADOCK_PROGRESS:(\d+)\|([^\]]*)\]/);
+        if (progressMatch) {
+          let percent = Number(progressMatch[1]);
+          if (batchTotalJobs > 0) {
+            percent = ((batchCurrentJob - 1) * 100 + percent) / batchTotalJobs;
+          }
+          latestDeployProgress = percent;
+          setDeployProgress(percent, progressMatch[2]);
+        }
         const exitCodeMatch = parsed.message.match(/\[SELESAI\] Exit code: (-?\d+)/);
         if (exitCodeMatch) exitCode = Number(exitCodeMatch[1]);
 
         if (parsed.message.includes('[STREAM_END]')) {
           finish(exitCode === 0);
         } else {
-          term.innerText += parsed.message;
+          term.innerText += parsed.message
+            .replace(/\[LADOCK_PROGRESS:\d+\|[^\]]*\]\n?/g, '');
           term.scrollTop = term.scrollHeight;
         }
       }

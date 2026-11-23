@@ -101,3 +101,44 @@ def test_deploy_script_check_only_flag(tmp_path: Path):
     assert "root_web" in proc.stdout
     assert "tesis" in proc.stdout
     assert "SERVICE TIDAK DIGUNAKAN" in proc.stdout
+
+
+def test_single_cpanel_webroot_check_only_uses_main_domain(tmp_path: Path):
+    project = tmp_path / "single_app"
+    project.mkdir()
+    (project / "index.php").write_text("<?php", encoding="utf-8")
+    userdata = project / ".cpanel_metadata" / "userdata"
+    userdata.mkdir(parents=True)
+    (userdata / "main").write_text(
+        "main_domain: example.test\nsub_domains: []\n",
+        encoding="utf-8",
+    )
+
+    deploy_sh = Path(__file__).parent.parent / "deploy.sh"
+    proc = subprocess.run(
+        ["bash", str(deploy_sh), str(project), "--check-only"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 0
+    assert "root_web" in proc.stdout
+    assert "example.test" in proc.stdout
+    assert "SERVICE MASIH DIGUNAKAN" in proc.stdout
+
+
+def test_deploy_script_ignores_gateway_options(tmp_path: Path):
+    deploy_sh = Path(__file__).parent.parent / "deploy.sh"
+    project = tmp_path / "app_no_gw"
+    project.mkdir()
+    (project / "index.php").write_text("<?php echo 'ok';", encoding="utf-8")
+
+    proc = subprocess.run(
+        ["bash", str(deploy_sh), str(project), "--check-only", "--with-gateway"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 0
+    assert "gateway dinonaktifkan" in proc.stderr.lower()
+    assert "Gateway Port" not in proc.stdout

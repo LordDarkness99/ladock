@@ -1,0 +1,105 @@
+TECH STACK YANG DIDUKUNG LADock
+===============================
+
+LaDock mendeteksi stack aplikasi dan dapat membuat image/container untuk runtime
+yang didukung. Build otomatis tersedia untuk runtime berikut.
+
+1. PHP
+   Framework/aplikasi yang dikenali:
+   - Laravel
+   - WordPress
+   - CodeIgniter
+   - Symfony
+   - PHP native/legacy
+
+   Build menggunakan image PHP-Apache LaDock. Versi PHP dan ekstensi yang
+   diperlukan dideteksi dari konfigurasi project; aplikasi legacy dapat memakai
+   aturan kompatibilitas LaDock.
+
+2. Node.js
+   Framework/aplikasi yang dikenali:
+   - Next.js
+   - Express
+   - NestJS
+   - Node.js native
+
+   Package manager: npm, Yarn, atau pnpm.
+   Build otomatis memerlukan scripts.start, atau entrypoint yang didukung
+   (server.js/index.js). Next.js dapat memakai perintah start bawaan.
+
+3. Python
+   Framework/aplikasi yang dikenali:
+   - Django
+   - Flask
+   - FastAPI
+   - Python script/app
+
+   Package manager: pip, Poetry, atau Pipenv.
+   Project harus menyediakan requirements.txt, pyproject.toml, atau Pipfile,
+   serta entrypoint yang dapat dideteksi.
+
+4. Go
+   Aplikasi Go dengan Go modules.
+   Build otomatis menjalankan go build dari root project.
+
+5. Ruby
+   Framework/aplikasi yang dikenali:
+   - Ruby on Rails
+   - Sinatra
+   - Rack/Ruby app
+
+   Menggunakan Bundler. Entrypoint yang didukung antara lain Rails, config.ru,
+   atau app.rb.
+
+6. Java
+   Spring Boot dapat dibangun otomatis menggunakan Maven (pom.xml) atau Gradle
+   wrapper (gradlew).
+   Java non-Spring Boot dapat dijalankan dengan Dockerfile yang disediakan
+   project, tetapi tidak termasuk jalur build otomatis.
+
+VERSI RUNTIME DEFAULT
+---------------------
+
+- PHP: 8.2; aplikasi PHP legacy tertentu dapat memakai versi kompatibilitas.
+- Node.js: 20.
+- Python: 3.11.
+- Go: 1.22.
+- Ruby: 3.3.
+- Java: 21.
+
+Versi yang dinyatakan di Dockerfile, file versi project, atau manifest dapat
+menggantikan default, jika versi/image tersebut tersedia dan kompatibel.
+
+RENTANG VERSI
+-------------
+
+LaDock tidak menetapkan batas minimum dan maksimum tetap untuk keenam runtime.
+Angka di bagian "Versi Runtime Default" adalah versi fallback, bukan rentang
+versi yang dijamin.
+
+- PHP: tidak ada rentang min-max tetap. PHP 8.2 adalah default; PHP 7.4
+  digunakan sebagai fallback kompatibilitas untuk aplikasi legacy tertentu.
+- Node.js, Python, Go, Ruby, dan Java: tidak ada rentang min-max tetap.
+  Versi diambil dari konfigurasi project atau menggunakan default di atas.
+
+Versi yang dapat dibuild bergantung pada tersedianya tag image runtime yang
+diminta dan kompatibilitas dependency/aplikasi. Karena itu, versi terendah atau
+tertinggi yang bisa dipakai dapat berubah dan tidak dapat disimpulkan dari
+default saja. Periksa file stack.json hasil deteksi dan hasil build untuk
+mengetahui versi yang dipilih bagi suatu project.
+
+DOCKERFILE KUSTOM
+-----------------
+
+Project dengan runtime, framework, dependency, atau entrypoint khusus dapat
+menyediakan Dockerfile sendiri. LaDock akan menggunakan Dockerfile tersebut
+untuk build. Konfigurasi aplikasi, dependency, port yang didengarkan, dan
+kompatibilitas image tetap perlu disiapkan sesuai kebutuhan project.
+
+DATABASE
+--------
+
+Deploy standar LaDock menyediakan MySQL sentral dan mengatur database/kredensial
+untuk aplikasi. Detector dapat mengenali indikasi PostgreSQL, SQLite, atau
+MongoDB di konfigurasi aplikasi, tetapi LaDock tidak otomatis menyediakan
+server database untuk semua jenis tersebut.

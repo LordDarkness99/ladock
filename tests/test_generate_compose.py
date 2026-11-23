@@ -3,6 +3,7 @@ import json
 import pytest
 
 from scripts.generate_compose import build_app_compose
+from scripts.add_gateway_to_compose import add_gateway_service
 
 
 def test_memory_limit_is_applied_to_every_microservice_container():
@@ -166,4 +167,44 @@ def test_no_gateway_omits_gateway_container_and_route_mounts():
     assert "app_web:" in compose
     assert "app_api:" in compose
     assert "networks:" in compose
+
+
+def test_single_app_compose_can_add_a_host_gateway():
+    compose = """services:
+  app_sample:
+    image: sample
+
+networks:
+  ladock_net:
+    external: true
+"""
+
+    updated = add_gateway_service(compose, "sample", 8080, "512M")
+
+    assert "gateway_sample:" in updated
+    assert '"8080:80"' in updated
+    assert "      - app_sample" in updated
+    assert "      - ladock_net" in updated
+
+
+def test_single_app_gateway_rejects_duplicate_or_invalid_definitions():
+    compose = """services:
+  app_sample:
+    image: sample
+
+networks:
+  ladock_net:
+    external: true
+"""
+
+    with pytest.raises(ValueError, match="Port gateway"):
+        add_gateway_service(compose, "sample", 80, "512M")
+
+    with pytest.raises(ValueError, match="sudah ada"):
+        add_gateway_service(
+            compose + "\n  gateway_sample:\n    image: httpd\n",
+            "sample",
+            8080,
+            "512M",
+        )
 

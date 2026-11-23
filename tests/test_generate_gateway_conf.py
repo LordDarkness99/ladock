@@ -53,6 +53,37 @@ def test_gateway_supports_route_aliases_for_services():
     assert "/root_web/" not in config
 
 
+def test_gateway_routes_cpanel_domains_by_host_header():
+    config = build_gateway_conf(
+        "sample",
+        [
+            {"name": "root_web", "http_port": 8081, "container_port": 80},
+            {"name": "surveylance", "http_port": 8082, "container_port": 80},
+        ],
+        8080,
+        domains={
+            "root_web": "example.test",
+            "surveylance": "survey.example.test",
+        },
+    )
+
+    assert "ServerName example.test" in config
+    assert "ServerName survey.example.test" in config
+    assert "ProxyPass        /  http://app_surveylance:80/" in config
+    assert "ProxyPass        /surveylance/" not in config
+    assert config.count("<VirtualHost *:80>") == config.count("</VirtualHost>")
+
+
+def test_gateway_rejects_invalid_cpanel_domains():
+    with pytest.raises(ValueError, match="Domain gateway tidak valid"):
+        build_gateway_conf(
+            "sample",
+            [{"name": "web", "http_port": 8081}],
+            8080,
+            domains={"web": "example.test; Include /tmp/evil.conf"},
+        )
+
+
 def test_gateway_rejects_unsafe_route_aliases():
     with pytest.raises(ValueError, match="Route gateway tidak valid"):
         build_gateway_conf(

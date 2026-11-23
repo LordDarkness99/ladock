@@ -17,7 +17,7 @@ Mulai deploy.sh
   |
   +--> Parse argumen
   |      Input: folder project atau arsip
-  |      Opsi: mode, port, dump DB, replace, gateway, service filter, dll.
+  |      Opsi: mode, port, dump DB, replace, service filter, dll.
   |
   +--> Validasi batas memori
   |
@@ -192,19 +192,17 @@ MICROSERVICE
   +--> Tidak ada service tersisa? --> Berhenti dengan error
   +--> Letakkan source terpilih di docker/apps/<project>/apps/<service>
   +--> Tempatkan root_web terlebih dahulu bila ada
-  +--> Pilih port kosong per service
-  |      --with-gateway: pilih port gateway dan port langsung service
-  |      tanpa gateway: pilih port langsung untuk setiap service
+  +--> Pilih port kosong langsung untuk setiap service
   +--> Deteksi stack/runtime dan port container per service
   +--> Siapkan kredensial DB terpisah untuk setiap service
   +--> Jalankan MySQL sentral; buat database dan user setiap service
   +--> Jika dump DB legacy tersedia dan database service belum berisi tabel,
   |    import dump tersebut
   +--> Perbarui .env dan konfigurasi aplikasi/legacy
-  +--> Generate vhost; generate gateway config jika gateway aktif
-  +--> Generate docker-compose-app.yml
+  +--> Generate vhost per-service
+  +--> Generate docker-compose-app.yml (tanpa gateway)
   +--> docker compose up -d --build
-  +--> Tampilkan URL gateway atau URL langsung tiap service
+  +--> Tampilkan URL langsung tiap service
 
 
 6. PENANGANAN ERROR

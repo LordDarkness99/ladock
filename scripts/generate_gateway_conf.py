@@ -46,11 +46,26 @@ def _route_for_service(service: dict) -> str:
     return route
 
 
+def _domain_for_service(domain: str, service_name: str) -> str:
+    domain = domain.strip().lower().rstrip(".")
+    if len(domain) > 253 or not re.fullmatch(
+        r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}",
+        domain,
+    ):
+        raise ValueError(f"Domain gateway tidak valid untuk service {service_name!r}: {domain!r}")
+    return domain
+
+
 # ---------------------------------------------------------------------------
 # Config builder
 # ---------------------------------------------------------------------------
 
-def build_gateway_conf(project: str, services: list[dict], gateway_port: int) -> str:
+def build_gateway_conf(
+    project: str,
+    services: list[dict],
+    gateway_port: int,
+    domains: dict[str, str] | None = None,
+) -> str:
     """
     services: [{"name": str, "http_port": int}, ...]
     """
@@ -62,41 +77,82 @@ def build_gateway_conf(project: str, services: list[dict], gateway_port: int) ->
         "LoadModule proxy_http_module modules/mod_proxy_http.so",
         "LoadModule rewrite_module modules/mod_rewrite.so",
         "LoadModule headers_module modules/mod_headers.so",
-        "",
-        "<VirtualHost *:80>",
-        f"    ServerName {project}.local",
-        "",
-        "    ProxyRequests Off",
-        "    RedirectMatch 404 ^/$",
-        "",
-        "    # ── Security headers ────────────────────────────────────",
-        '    Header always set X-Content-Type-Options "nosniff"',
-        '    Header always set X-Frame-Options "SAMEORIGIN"',
-        '    Header always set X-Gateway "apache-microservice-gw"',
-        "",
-        "    # ── Service routes (path-based, prefix stripped) ─────────",
     ]
 
-    for svc in services:
-        sname = svc["name"]
-        route = _route_for_service(svc)
-        container_port = svc.get("container_port", 80)
+    if domains:
+        service_names = {service["name"] for service in services}
+        unknown_services = set(domains) - service_names
+        if unknown_services:
+            raise ValueError(f"Domain gateway merujuk service yang tidak dikenal: {sorted(unknown_services)}")
         lines += [
-            f"",
-            f"    # [{sname}] -> http://app_{sname}:{container_port}",
-            f"    <Location /{route}/>",
-            f"        ProxyPreserveHost On",
-            f"        ProxyPassReverseCookiePath / /{route}/",
-            f"    </Location>",
-            f"    ProxyPass        /{route}/  http://app_{sname}:{container_port}/",
-            f"    ProxyPassReverse /{route}/  http://app_{sname}:{container_port}/",
-            f"    ProxyPassReverse /{route}/  http://app_{sname}/",
+            "",
+            "<VirtualHost *:80>",
+            f"    ServerName {project}.local",
+            "    ProxyRequests Off",
+            "    RedirectMatch 404 ^/$",
+            '    Header always set X-Content-Type-Options "nosniff"',
+            '    Header always set X-Frame-Options "SAMEORIGIN"',
+            '    Header always set X-Gateway "apache-microservice-gw"',
+            "</VirtualHost>",
         ]
+        for svc in services:
+            sname = svc["name"]
+            domain = domains.get(sname)
+            if not domain:
+                continue
+            domain = _domain_for_service(domain, sname)
+            container_port = svc.get("container_port", 80)
+            lines += [
+                "",
+                f"    # [{sname}] {domain} -> http://app_{sname}:{container_port}",
+                "    <VirtualHost *:80>",
+                f"        ServerName {domain}",
+                "        ProxyRequests Off",
+                "        ProxyPreserveHost On",
+                '        Header always set X-Content-Type-Options "nosniff"',
+                '        Header always set X-Frame-Options "SAMEORIGIN"',
+                '        Header always set X-Gateway "apache-microservice-gw"',
+                f"        ProxyPass        /  http://app_{sname}:{container_port}/",
+                f"        ProxyPassReverse /  http://app_{sname}:{container_port}/",
+                "    </VirtualHost>",
+            ]
+    else:
+        lines += [
+            "",
+            "<VirtualHost *:80>",
+            f"    ServerName {project}.local",
+            "",
+            "    ProxyRequests Off",
+            "    RedirectMatch 404 ^/$",
+            "",
+            "    # ── Security headers ────────────────────────────────────",
+            '    Header always set X-Content-Type-Options "nosniff"',
+            '    Header always set X-Frame-Options "SAMEORIGIN"',
+            '    Header always set X-Gateway "apache-microservice-gw"',
+            "",
+            "    # ── Service routes (path-based, prefix stripped) ─────────",
+        ]
+        for svc in services:
+            sname = svc["name"]
+            route = _route_for_service(svc)
+            container_port = svc.get("container_port", 80)
+            lines += [
+                f"",
+                f"    # [{sname}] -> http://app_{sname}:{container_port}",
+                f"    <Location /{route}/>",
+                f"        ProxyPreserveHost On",
+                f"        ProxyPassReverseCookiePath / /{route}/",
+                f"    </Location>",
+                f"    ProxyPass        /{route}/  http://app_{sname}:{container_port}/",
+                f"    ProxyPassReverse /{route}/  http://app_{sname}:{container_port}/",
+                f"    ProxyPassReverse /{route}/  http://app_{sname}/",
+            ]
 
-    lines += [
-        "",
-        "</VirtualHost>",
-    ]
+    if not domains:
+        lines += [
+            "",
+            "</VirtualHost>",
+        ]
     return "\n".join(lines) + "\n"
 
 
@@ -109,12 +165,14 @@ def main():
     ap.add_argument("--project",      required=True)
     ap.add_argument("--services",     required=True, help="'name1:port1,name2:port2,...'")
     ap.add_argument("--routes",       default="", help="'name1:path1,name2:path2,...'")
+    ap.add_argument("--domains",      default="", help="'name1:domain1,name2:domain2,...'")
     ap.add_argument("--container-ports", default="", help="'name1:port1,name2:port2,...'")
     ap.add_argument("--gateway-port", required=True, type=int)
     args = ap.parse_args()
 
     svc_ports = _pairs(args.services)
     routes = _pairs(args.routes)
+    domains = _pairs(args.domains)
     container_ports = _pairs(args.container_ports)
     services = [
         {
@@ -130,7 +188,7 @@ def main():
         print("Tidak ada service.", file=sys.stderr)
         sys.exit(1)
 
-    output = build_gateway_conf(args.project, services, args.gateway_port)
+    output = build_gateway_conf(args.project, services, args.gateway_port, domains or None)
     sys.stdout.write(output)
 
 

@@ -160,6 +160,17 @@ ensure_central_db() {
     fi
     sleep 2; elapsed=$((elapsed+2))
   done
+  local server_defaults
+  server_defaults="$(docker exec -i "$CONTAINER_NAME" mysql -uroot -p"$ROOT_PASS" -Nse "
+    SET GLOBAL character_set_server = 'utf8mb4';
+    SET GLOBAL collation_server = 'utf8mb4_general_ci';
+    SELECT CONCAT(@@global.character_set_server, '/', @@global.collation_server);
+  ")"
+  if [[ "$server_defaults" != "utf8mb4/utf8mb4_general_ci" ]]; then
+    echo "❌ Default charset MySQL tidak kompatibel dengan client PHP legacy: $server_defaults" >&2
+    exit 1
+  fi
+  info "Default charset MySQL kompatibel dengan client PHP legacy."
   remove_stale_socket_link
   log "Database Sentral MySQL ('$CONTAINER_NAME') SIAP!"
 }

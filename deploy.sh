@@ -12,7 +12,8 @@
 # ==============================================================================
 
 set -euo pipefail
-trap 'echo "❌ [DEPLOY ERROR] Terjadi kegagalan pada baris $LINENO!" >&2' ERR
+exec 3>&1
+trap 'status=$?; trap - ERR; message="❌ [DEPLOY ERROR] Terjadi kegagalan pada baris $LINENO!"; printf "%s\n" "$message" >&2; printf "%s Periksa log: %s\n" "$message" "${DEPLOY_LOG_FILE:-log deployment}" >&3; exit "$status"' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE_DIR="$SCRIPT_DIR/templates"
@@ -28,7 +29,6 @@ fi
 # ── Baca konfigurasi default dari config.json jika ada ────────────────────────
 DEFAULT_DEPLOY_ROOT="$SCRIPT_DIR/docker/apps"
 DEFAULT_MONOLITH_PORT=8080
-DEFAULT_GATEWAY_PORT=8080
 DEFAULT_BASE_APP_PORT=8081
 DEFAULT_DB_PORT=3310
 DEFAULT_MEMORY_LIMIT=512M
@@ -36,7 +36,6 @@ DEFAULT_MEMORY_LIMIT=512M
 if [[ -f "$CONFIG_FILE" ]] && command -v python3 >/dev/null 2>&1; then
   DEFAULT_DEPLOY_ROOT="$(python3 -c "import json, os; d=json.load(open('$CONFIG_FILE')); r=d.get('deploy_root', '$DEFAULT_DEPLOY_ROOT'); print(os.path.abspath(os.path.join('$SCRIPT_DIR', r)) if not os.path.isabs(r) else r)" 2>/dev/null || echo "$DEFAULT_DEPLOY_ROOT")"
   DEFAULT_MONOLITH_PORT="$(python3 -c "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('default_ports', {}).get('monolith_http', $DEFAULT_MONOLITH_PORT))" 2>/dev/null || echo "$DEFAULT_MONOLITH_PORT")"
-  DEFAULT_GATEWAY_PORT="$(python3 -c "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('default_ports', {}).get('gateway_http', $DEFAULT_GATEWAY_PORT))" 2>/dev/null || echo "$DEFAULT_GATEWAY_PORT")"
   DEFAULT_BASE_APP_PORT="$(python3 -c "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('default_ports', {}).get('base_app_port', $DEFAULT_BASE_APP_PORT))" 2>/dev/null || echo "$DEFAULT_BASE_APP_PORT")"
   DEFAULT_DB_PORT="$(python3 -c "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('central_db', {}).get('port', $DEFAULT_DB_PORT))" 2>/dev/null || echo "$DEFAULT_DB_PORT")"
   DEFAULT_MEMORY_LIMIT="$(python3 -c "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('resources', {}).get('memory_limit', '$DEFAULT_MEMORY_LIMIT'))" 2>/dev/null || echo "$DEFAULT_MEMORY_LIMIT")"
@@ -63,7 +62,6 @@ DEPLOY_ALL_SERVICES=0
 INCLUDE_SERVICES=""
 EXCLUDE_SERVICES=""
 CHECK_ONLY=0
-USE_GATEWAY=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -85,8 +83,10 @@ for arg in "$@"; do
     --include-services=*|--include-service=*) INCLUDE_SERVICES="${arg#*=}" ;;
     --exclude-services=*|--exclude-service=*) EXCLUDE_SERVICES="${arg#*=}" ;;
     --check-only)      CHECK_ONLY=1 ;;
-    --with-gateway|--gateway) USE_GATEWAY=1 ;;
-    --no-gateway)      USE_GATEWAY=0 ;;
+    --with-gateway|--gateway)
+      echo "⚠️  Opsi gateway diabaikan: gateway dinonaktifkan." >&2
+      ;;
+    --no-gateway)      ;;
     *) ARGS+=("$arg") ;;
   esac
 done
@@ -94,6 +94,16 @@ done
 if [[ ! "$MEMORY_LIMIT" =~ ^[1-9][0-9]*([.][0-9]+)?([bBkKmMgG]|[kKmMgG][bB])?$ ]]; then
   echo "❌ Batas memori tidak valid: '$MEMORY_LIMIT'. Gunakan ukuran seperti 512M atau 1G." >&2
   exit 1
+fi
+
+DEPLOY_LOG_DIR="$SCRIPT_DIR/logs"
+mkdir -p "$DEPLOY_LOG_DIR"
+DEPLOY_LOG_FILE="$DEPLOY_LOG_DIR/deploy_$(date +%Y%m%d_%H%M%S)_$$.log"
+DEPLOY_INTERACTIVE=0
+[[ -t 1 ]] && DEPLOY_INTERACTIVE=1
+if [[ "$CHECK_ONLY" -ne 1 ]]; then
+  exec > >(tee -a "$DEPLOY_LOG_FILE" >/dev/null) 2>&1
+  printf '[%s] Deployment dimulai.\n' "$(date --iso-8601=seconds)" >> "$DEPLOY_LOG_FILE"
 fi
 
 # Deteksi otomatis jika argumen pertama adalah file arsip (.zip, .tar.gz, dll.)
@@ -119,7 +129,7 @@ else
   PHP_VERSION_PARAM="${ARGS[3]:-}"
 fi
 [[ "$HTTP_PORT" == "auto" ]] && HTTP_PORT=""
-GATEWAY_PORT="$HTTP_PORT"
+GATEWAY_PORT=""
 
 # ── Utilitas ──────────────────────────────────────────────────────────────────
 usage() {
@@ -133,7 +143,7 @@ Penggunaan (Monolith / Standalone App):
   $0 --cpmove=/path/cpmove-xxx.tar.gz [http_port] [central_db_host_port] [php_version] [flags]
 
 Penggunaan (Microservices):
-  $0 /path/to/root-folder [gateway_port] [central_db_host_port] [flags]
+  $0 /path/to/root-folder [base_app_port] [central_db_host_port] [flags]
   $0 /path/to/root-folder --mode=microservice
 
 Flags:
@@ -152,8 +162,6 @@ Flags:
   --include-service=NAME  Paksa service tertentu untuk tetap dideploy (bisa dipisah koma)
   --exclude-service=NAME  Paksa service tertentu untuk tidak dideploy (bisa dipisah koma)
   --check-only       Hanya periksa status keaktifan service tanpa menjalankan deployment
-  --with-gateway     Aktifkan reverse proxy Apache Gateway (default: tidak aktif)
-  --no-gateway       Jangan gunakan reverse proxy Gateway (default)
 
 Nama project yang sudah pernah di-deploy ditolak untuk mencegah deployment duplikat.
 Deploy bersamaan dengan nama project yang sama juga ditolak.
@@ -163,6 +171,34 @@ EOF
 log()  { echo -e "--> $*"; }
 info() { echo -e "    $*"; }
 hr()   { echo "============================================================"; }
+
+ladock_progress() {
+  local percent="${1:-0}"
+  local label="${2:-Memproses}"
+  [[ "$percent" =~ ^[0-9]+$ ]] || percent=0
+  if (( percent > 100)); then percent=100; fi
+  if (( percent < 0)); then percent=0; fi
+
+  local width=30
+  local filled=$(( percent * width / 100 ))
+  local empty=$(( width - filled ))
+  local bar=""
+  printf -v bar '%*s' "$filled" ''
+  bar="${bar// /#}"
+  printf -v bar_empty '%*s' "$empty" ''
+  bar_empty="${bar_empty// /-}"
+
+  if [[ "$DEPLOY_INTERACTIVE" -eq 1 ]]; then
+    printf '\r\033[K[%s%s] %3d%% - %s' "$bar" "$bar_empty" "$percent" "$label" >&3
+    if [[ "$percent" -ge 100 ]]; then
+      printf '\n' >&3
+    fi
+  else
+    printf '[LADOCK_PROGRESS:%s|%s]\n' "$percent" "$label" >&3
+  fi
+  printf '[%s] Progress %s%%: %s\n' "$(date --iso-8601=seconds)" "$percent" "$label" >> "$DEPLOY_LOG_FILE"
+  return 0
+}
 
 find_available_ports() {
   local excluded_ports="$DEFAULT_DB_PORT"
@@ -183,6 +219,35 @@ read_env_value() {
 
 set_clean_env() {
   python3 "$SCRIPTS_DIR/env_config.py" set --file "$1" --key "$2" --value "$3"
+}
+
+verify_php_db_connection() {
+  local compose_file="$1"
+  local stack_name="$2"
+  local container_name="$3"
+  local service_name="$4"
+  log "Memverifikasi koneksi database PHP untuk service '$service_name'..."
+  if ! $DC -f "$compose_file" -p "$stack_name" \
+    exec -T "$container_name" php -r '
+      $host = getenv("DB_HOST") ?: "ladock_mysql";
+      $port = getenv("DB_PORT") ?: "3306";
+      $database = getenv("DB_DATABASE");
+      $username = getenv("DB_USERNAME");
+      $password = getenv("DB_PASSWORD");
+      if (!$database || !$username) {
+        fwrite(STDERR, "DB_DATABASE atau DB_USERNAME tidak tersedia di environment container.\n");
+        exit(2);
+      }
+      try {
+        new PDO("mysql:host={$host};port={$port};dbname={$database};charset=utf8mb4", $username, $password);
+      } catch (Exception $error) {
+        fwrite(STDERR, "Koneksi PDO gagal: " . $error->getMessage() . "\n");
+        exit(1);
+      }
+    '; then
+    echo "❌ Koneksi database service '$service_name' gagal; deployment dihentikan." >&2
+    return 1
+  fi
 }
 
 report_skipped_ports() {
@@ -357,7 +422,11 @@ fi
 
 # ── Ekstraksi Arsip (.zip / .tar.gz / .tgz) ───────────────────────────────────
 if [[ -n "$ARCHIVE_FILE" ]]; then
-  [[ ! -f "$ARCHIVE_FILE" ]] && echo "❌ File arsip tidak ditemukan: $ARCHIVE_FILE" && exit 1
+  ladock_progress 5 "Memeriksa arsip"
+  if [[ ! -f "$ARCHIVE_FILE" ]]; then
+    echo "❌ File arsip tidak ditemukan: $ARCHIVE_FILE" >&2
+    exit 1
+  fi
   ARCHIVE_FILE="$(cd "$(dirname "$ARCHIVE_FILE")" && pwd)/$(basename "$ARCHIVE_FILE")"
 
   if [[ -z "$ARCHIVE_DEST" ]]; then
@@ -393,6 +462,7 @@ if [[ -n "$ARCHIVE_FILE" ]]; then
 
   log "Checkpoint: target arsip lolos pemeriksaan dan siap diekstrak."
   log "Mengekstrak dan memvalidasi arsip ($ARCHIVE_FILE)..."
+  ladock_progress 15 "Mengekstrak arsip"
   if ! PROJECT_PATH="$(python3 "$SCRIPTS_DIR/extract_archive.py" "$ARCHIVE_FILE" "$ARCHIVE_DEST" "$CENTRAL_DB_DIR")"; then
     restore_archive_backup "$ARCHIVE_DEST" "$CENTRAL_DB_DIR" "$CLEAN_EXTRACT_APP"
     echo "❌ Gagal mengekstrak arsip." >&2
@@ -451,14 +521,48 @@ if [[ -z "$PROJECT_NAME" ]]; then
   exit 1
 fi
 
+PROJECT_CPANEL_META_DIR=""
+if [[ -d "$PROJECT_PATH/.cpanel_metadata" ]]; then
+  PROJECT_CPANEL_META_DIR="$PROJECT_PATH/.cpanel_metadata"
+elif [[ -n "$ARCHIVE_DEST" && -d "$ARCHIVE_DEST/.cpanel_metadata" ]]; then
+  PROJECT_CPANEL_META_DIR="$ARCHIVE_DEST/.cpanel_metadata"
+fi
+
+MONOLITH_CHECK_ARGS=(--project-path "$PROJECT_PATH" --project-name "$PROJECT_NAME")
+[[ -d "$SCRIPT_DIR/mysql/db/$PROJECT_NAME" ]] && MONOLITH_CHECK_ARGS+=(--db-dumps-dir "$SCRIPT_DIR/mysql/db/$PROJECT_NAME")
+[[ -n "$INCLUDE_SERVICES" ]] && MONOLITH_CHECK_ARGS+=(--include "$INCLUDE_SERVICES")
+[[ -n "$EXCLUDE_SERVICES" ]] && MONOLITH_CHECK_ARGS+=(--exclude "$EXCLUDE_SERVICES")
+[[ "$DEPLOY_ALL_SERVICES" -eq 1 ]] && MONOLITH_CHECK_ARGS+=(--all)
+
+CPANEL_MAIN_DOMAIN=""
+CPANEL_ROOT_ACTIVE=0
+if [[ "$DEPLOY_MODE" == "monolith" && -n "$PROJECT_CPANEL_META_DIR" ]]; then
+  MONOLITH_CHECK_ARGS+=(--services "root_web:$PROJECT_PATH" --cpanel-meta "$PROJECT_CPANEL_META_DIR")
+  MONOLITH_USAGE_JSON="$(python3 "$SCRIPTS_DIR/check_service_usage.py" "${MONOLITH_CHECK_ARGS[@]}" --json)"
+  mapfile -t CPANEL_ROOT_STATUS < <(python3 -c '
+import json, sys
+for service in json.load(sys.stdin):
+    if service.get("name") == "root_web":
+        print("1" if service.get("is_used") else "0")
+        print(service.get("details", {}).get("domain") or "")
+        break
+' <<<"$MONOLITH_USAGE_JSON")
+  CPANEL_ROOT_ACTIVE="${CPANEL_ROOT_STATUS[0]:-0}"
+  CPANEL_MAIN_DOMAIN="${CPANEL_ROOT_STATUS[1]:-}"
+fi
+
 if [[ "$CHECK_ONLY" -eq 1 ]]; then
-  CHECK_ARGS=(--project-path "$PROJECT_PATH" --project-name "$PROJECT_NAME")
-  [[ -d "$PROJECT_PATH/.cpanel_metadata" ]] && CHECK_ARGS+=(--cpanel-meta "$PROJECT_PATH/.cpanel_metadata")
-  [[ -d "$SCRIPT_DIR/mysql/db/$PROJECT_NAME" ]] && CHECK_ARGS+=(--db-dumps-dir "$SCRIPT_DIR/mysql/db/$PROJECT_NAME")
-  [[ -n "$INCLUDE_SERVICES" ]] && CHECK_ARGS+=(--include "$INCLUDE_SERVICES")
-  [[ -n "$EXCLUDE_SERVICES" ]] && CHECK_ARGS+=(--exclude "$EXCLUDE_SERVICES")
-  [[ "$DEPLOY_ALL_SERVICES" -eq 1 ]] && CHECK_ARGS+=(--all)
-  python3 "$SCRIPTS_DIR/check_service_usage.py" "${CHECK_ARGS[@]}" --report
+  if [[ "$DEPLOY_MODE" == "monolith" ]]; then
+    python3 "$SCRIPTS_DIR/check_service_usage.py" "${MONOLITH_CHECK_ARGS[@]}" --report
+  else
+    CHECK_ARGS=(--project-path "$PROJECT_PATH" --project-name "$PROJECT_NAME")
+    [[ -d "$PROJECT_PATH/.cpanel_metadata" ]] && CHECK_ARGS+=(--cpanel-meta "$PROJECT_PATH/.cpanel_metadata")
+    [[ -d "$SCRIPT_DIR/mysql/db/$PROJECT_NAME" ]] && CHECK_ARGS+=(--db-dumps-dir "$SCRIPT_DIR/mysql/db/$PROJECT_NAME")
+    [[ -n "$INCLUDE_SERVICES" ]] && CHECK_ARGS+=(--include "$INCLUDE_SERVICES")
+    [[ -n "$EXCLUDE_SERVICES" ]] && CHECK_ARGS+=(--exclude "$EXCLUDE_SERVICES")
+    [[ "$DEPLOY_ALL_SERVICES" -eq 1 ]] && CHECK_ARGS+=(--all)
+    python3 "$SCRIPTS_DIR/check_service_usage.py" "${CHECK_ARGS[@]}" --report
+  fi
   log "Mode --check-only selesai."
   exit 0
 fi
@@ -467,19 +571,31 @@ if [[ -z "$ARCHIVE_FILE" ]]; then
   check_duplicate_deploy "$PROJECT_NAME"
   log "Checkpoint: target project lolos pemeriksaan deployment."
 fi
+if [[ "$DEPLOY_MODE" == "monolith" && -n "$PROJECT_CPANEL_META_DIR" ]]; then
+  python3 "$SCRIPTS_DIR/check_service_usage.py" "${MONOLITH_CHECK_ARGS[@]}" --report
+  if [[ "$CPANEL_ROOT_ACTIVE" -ne 1 ]]; then
+    echo "❌ Service root_web tidak terdeteksi aktif; deployment dibatalkan." >&2
+    echo "   Gunakan --all-services hanya jika memang ingin memaksa deployment." >&2
+    exit 1
+  fi
+fi
 
 # ==============================================================================
 # ██████████████████████  MODE MONOLITH  █████████████████████████████████████
 # ==============================================================================
 if [[ "$DEPLOY_MODE" == "monolith" ]]; then
+  ladock_progress 25 "Menyiapkan struktur project"
 
   stop_existing_container "${PROJECT_NAME}_app"
   stop_existing_container "app_${PROJECT_NAME}"
+  stop_existing_container "${PROJECT_NAME}_gateway"
+  stop_existing_container "gateway_${PROJECT_NAME}"
+
   PORT_START="${HTTP_PORT:-$DEFAULT_MONOLITH_PORT}"
   PORT_RESULT="$(find_available_ports "$PORT_START" 1)"
   report_skipped_ports <<<"$PORT_RESULT"
   HTTP_PORT="$(printf '%s' "$PORT_RESULT" | read_selected_ports)"
-  GATEWAY_PORT="$HTTP_PORT"
+  GATEWAY_PORT=""
   info "Port HTTP dipilih: $HTTP_PORT (port terpakai dilewati otomatis)."
 
   # ── Pusatkan semua aplikasi ke folder docker/apps/<app_name>/ ──────────────
@@ -547,6 +663,7 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
 
   # ── Deteksi Stack & Dependencies (stack.json) ──────────────────────────────
   log "Mendeteksi stack, runtime, ekstensi, dan dependensi..."
+  ladock_progress 35 "Mendeteksi stack dan runtime"
   if [[ -f "$PROJECT_PATH/Dockerfile" && ! -f "$SRC_DIR/Dockerfile" ]] && \
     ! grep -Eq '^# (LaDock.*Universal PHP \+ Apache Application Image|Generated by LaDock)' "$PROJECT_PATH/Dockerfile"; then
     cp "$PROJECT_PATH/Dockerfile" "$SRC_DIR/Dockerfile"
@@ -574,8 +691,7 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
     PHP_VERSION="$PHP_VERSION_PARAM"
   fi
 
-  # Default ke Composer 2 yang sudah ter-cache di local docker
-  COMPOSER_VERSION=2
+  COMPOSER_VERSION="$(python3 "$SCRIPTS_DIR/select_composer_version.py" "$PHP_VERSION")"
 
   hr
   echo " Mode          : MONOLITH (Clean Structure)"
@@ -654,6 +770,7 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
   CENTRAL_DB_CONTAINER="${LADOCK_DB_CONTAINER:-ladock_mysql}"
   CENTRAL_DB_PORT="${LADOCK_DB_PORT:-$DEFAULT_DB_PORT}"
   CENTRAL_DB_ROOT_PASS="${LADOCK_DB_ROOT_PASS:-3baa6e5d124af02611fd0efb79ae292d}"
+  CENTRAL_DB_NETWORK="${LADOCK_NET:-ladock_net}"
   DB_PORT="$CENTRAL_DB_PORT"
 
   # ── Render File Deployment Bersih di Root Project ─────────────────────────
@@ -676,6 +793,7 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
         -e "s/__MEMORY_LIMIT__/$MEMORY_LIMIT/g" \
         -e "s/__PHP_VERSION__/$PHP_VERSION/g" \
         -e "s/__COMPOSER_VERSION__/$COMPOSER_VERSION/g" \
+        -e "s/__CENTRAL_DB_NETWORK__/$CENTRAL_DB_NETWORK/g" \
         "$TEMPLATE_DIR/docker-compose-app.yml.tpl" > "$PROJECT_PATH/docker-compose.yml"
   else
     python3 "$SCRIPTS_DIR/generate_runtime_compose.py" \
@@ -695,8 +813,9 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
   set_clean_env "$SRC_DIR/.env" DB_DATABASE "$DB_NAME"
   set_clean_env "$SRC_DIR/.env" DB_USERNAME "$DB_USER"
   set_clean_env "$SRC_DIR/.env" DB_PASSWORD "$DB_PASS"
-  set_clean_env "$SRC_DIR/.env" APP_URL "http://localhost:${HTTP_PORT}"
-  set_clean_env "$SRC_DIR/.env" ASSET_URL "http://localhost:${HTTP_PORT}"
+  APP_BASE_URL="http://localhost:${HTTP_PORT}"
+  set_clean_env "$SRC_DIR/.env" APP_URL "$APP_BASE_URL"
+  set_clean_env "$SRC_DIR/.env" ASSET_URL "$APP_BASE_URL"
 
   for key in ADMIN_HTTPS FORCE_HTTPS LARAVEL_ADMIN_HTTPS SESSION_SECURE_COOKIE; do
     [[ -n "$(read_env_value "$SRC_DIR/.env" "$key")" ]] && set_clean_env "$SRC_DIR/.env" "$key" false
@@ -769,6 +888,7 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
 
   # ── Buat Database & User di DB Sentral ────────────────────────────────────
   log "Memastikan Database '$DB_NAME' & User '$DB_USER' di DB Sentral..."
+  ladock_progress 55 "Menyiapkan database"
   SQL_DB_USER="${DB_USER//\\/\\\\}"
   SQL_DB_USER="${SQL_DB_USER//\'/\'\'}"
   SQL_DB_PASS="${DB_PASS//\\/\\\\}"
@@ -782,8 +902,16 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
   " >/dev/null 2>&1
 
   log "Membangun image sebelum memperbarui container aplikasi..."
+  ladock_progress 65 "Membangun dan menjalankan container"
   cd "$PROJECT_PATH"
   $DC -f docker-compose.yml -p "${PROJECT_NAME}_app_stack" up -d --build --remove-orphans
+  if [[ "$STACK_LANGUAGE" == "PHP" && "$CUSTOM_DOCKERFILE" != "true" ]]; then
+    verify_php_db_connection \
+      "$PROJECT_PATH/docker-compose.yml" \
+      "${PROJECT_NAME}_app_stack" \
+      "app_${PROJECT_NAME}" \
+      "$PROJECT_NAME"
+  fi
 
   # ── Import Dump Database ──────────────────────────────────────────────────
   IS_EMPTY_DB=0
@@ -797,6 +925,7 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
 
   if [[ $SHOULD_IMPORT -eq 1 ]]; then
     log "Memeriksa & mengimpor dump database (.sql) ke DB Sentral..."
+    ladock_progress 75 "Mengimpor database"
     DUMP_ARGS=(
       --project-path "$PROJECT_PATH"
       --project-name "$PROJECT_NAME"
@@ -819,36 +948,30 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
     APP_KEY_MISSING=0
     [[ -z "$(read_env_value "$SRC_DIR/.env" APP_KEY)" ]] && APP_KEY_MISSING=1
     log "Menyiapkan dependensi dan cache PHP di dalam container..."
-    $DC -f docker-compose.yml -p "${PROJECT_NAME}_app_stack" exec -T "app_${PROJECT_NAME}" bash -lc "
-    set -e
+    ladock_progress 85 "Menyiapkan dependensi dan cache"
+    $DC -f docker-compose.yml -p "${PROJECT_NAME}_app_stack" exec -T "app_${PROJECT_NAME}" bash -c "
+    set -euo pipefail
     if [ -f composer.json ]; then
-      if composer install --no-interaction --prefer-dist --optimize-autoloader 2>&1 | tee /tmp/composer_output | grep -q 'does not satisfy'; then
-        echo '⚠️  Dependencies tidak kompatibel, menjalankan composer update...'
-        composer update --no-interaction --prefer-dist --optimize-autoloader
+      if ! composer install --no-interaction --prefer-dist --optimize-autoloader 2>&1 | tee /tmp/composer_output; then
+        if grep -q 'does not satisfy' /tmp/composer_output; then
+          echo '⚠️  Dependencies tidak kompatibel, menjalankan composer update...'
+          composer update --no-interaction --prefer-dist --optimize-autoloader
+        else
+          exit 1
+        fi
       fi
     fi
-    if [ -f artisan ]; then
-      rm -f bootstrap/cache/*.php 2>/dev/null || true
-      rm -f storage/framework/sessions/* 2>/dev/null || true
-      rm -f storage/framework/views/*.php 2>/dev/null || true
-      php artisan config:clear || true
-      php artisan route:clear  || true
-      php artisan view:clear   || true
-      php artisan cache:clear  || true
-      if [ "$APP_KEY_MISSING" = "1" ]; then
-        php artisan key:generate --force
-      fi
-      rm -f bootstrap/cache/*.php 2>/dev/null || true
-      php artisan config:clear || true
-      php artisan route:clear  || true
-      php artisan migrate --force || true
-      php artisan storage:link  || true
+    "
+    if [[ -f "$SRC_DIR/artisan" ]]; then
+      $DC -f docker-compose.yml -p "${PROJECT_NAME}_app_stack" \
+        exec -T "app_${PROJECT_NAME}" bash -s -- "$APP_KEY_MISSING" \
+        < "$SCRIPTS_DIR/laravel_maintenance.sh"
     fi
-    " || true
   fi
 
   echo ""
   hr
+  ladock_progress 100 "Deployment selesai"
   echo " ✓ DEPLOY BERHASIL — Aplikasi '$PROJECT_NAME' sudah aktif!"
   echo " Akses Web    : http://localhost:$HTTP_PORT"
   echo " Runtime      : $STACK_LANGUAGE $STACK_RUNTIME_VERSION"
@@ -870,9 +993,11 @@ fi
 # ==============================================================================
 
 log "Mode MICROSERVICE diaktifkan"
+ladock_progress 25 "Menyiapkan microservices"
 
 declare -a SVC_NAMES=()
 declare -A SVC_PATHS=()
+declare -A SVC_DOMAINS=()
 
 while IFS=$'\t' read -r svc_name svc_path; do
   [[ -z "$svc_name" || -z "$svc_path" ]] && continue
@@ -951,6 +1076,19 @@ if [[ ${#SVC_NAMES[@]} -eq 0 ]]; then
   exit 1
 fi
 
+SERVICE_USAGE_JSON="$(python3 "$SCRIPTS_DIR/check_service_usage.py" "${CHECK_ARGS[@]}" --json)"
+while IFS=$'\t' read -r usage_name usage_domain; do
+  [[ -n "$usage_name" ]] && SVC_DOMAINS["$usage_name"]="$usage_domain"
+done < <(
+  python3 -c '
+import json, sys
+for service in json.load(sys.stdin):
+    domain = service.get("details", {}).get("domain") or ""
+    name = service.get("name", "")
+    print(f"{name}\t{domain}")
+' <<<"$SERVICE_USAGE_JSON"
+)
+
 SOURCE_PROJECT_PATH="$PROJECT_PATH"
 PROJECT_PATH="$DEFAULT_DEPLOY_ROOT/$PROJECT_NAME"
 LEGACY_PROJECT_PATH="$SCRIPT_DIR/docker/$PROJECT_NAME"
@@ -966,6 +1104,7 @@ if [[ ! -e "$PROJECT_PATH" && -d "$LEGACY_PROJECT_PATH" ]]; then
   done
 fi
 mkdir -p "$PROJECT_PATH/apps"
+ladock_progress 35 "Menyalin dan mendeteksi service"
 
 for svc_name in "${SVC_NAMES[@]}"; do
   SOURCE_SVC_PATH="${SVC_PATHS[$svc_name]}"
@@ -989,6 +1128,7 @@ declare -A SVC_ROUTE_NAMES=()
 declare -A SVC_RUNTIME_NAMES=()
 declare -A SVC_RUNTIME_VERSIONS=()
 declare -A SVC_CONTAINER_PORTS=()
+declare -A SVC_CUSTOM_DOCKERFILES=()
 
 for svc_name in "${SVC_NAMES[@]}"; do
   SVC_ROUTE_NAMES["$svc_name"]="$svc_name"
@@ -996,39 +1136,22 @@ done
 [[ -n "${SVC_ROUTE_NAMES[root_web]:-}" ]] && SVC_ROUTE_NAMES[root_web]="admin"
 
 stop_existing_container "${PROJECT_NAME}_gateway"
+stop_existing_container "gateway_${PROJECT_NAME}"
 for svc_name in "${SVC_NAMES[@]}"; do
   stop_existing_container "${PROJECT_NAME}_${svc_name}_app"
 done
 
-if [[ $USE_GATEWAY -eq 1 ]]; then
-  PORT_START="${HTTP_PORT:-$DEFAULT_GATEWAY_PORT}"
-  PORT_RESULT="$(find_available_ports "$PORT_START" 1)"
-  report_skipped_ports <<<"$PORT_RESULT"
-  GATEWAY_PORT="$(printf '%s' "$PORT_RESULT" | read_selected_ports)"
-  if [[ $BASE_APP_PORT_CUSTOM -eq 1 ]]; then
-    APP_PORT_START="$BASE_APP_PORT"
-  else
-    APP_PORT_START=$((GATEWAY_PORT + 1))
-    if [[ "$APP_PORT_START" -lt "$DEFAULT_BASE_APP_PORT" ]]; then
-      APP_PORT_START="$DEFAULT_BASE_APP_PORT"
-    fi
-  fi
-  BASE_PORT_RESULT="$(find_available_ports "$APP_PORT_START" "${#SVC_NAMES[@]}" "$GATEWAY_PORT")"
-  report_skipped_ports <<<"$BASE_PORT_RESULT"
-  mapfile -t APP_PORTS < <(printf '%s' "$BASE_PORT_RESULT" | read_selected_ports)
+GATEWAY_PORT=""
+if [[ $BASE_APP_PORT_CUSTOM -eq 1 ]]; then
+  APP_PORT_START="$BASE_APP_PORT"
+elif [[ -n "$HTTP_PORT" ]]; then
+  APP_PORT_START="$HTTP_PORT"
 else
-  GATEWAY_PORT=""
-  if [[ $BASE_APP_PORT_CUSTOM -eq 1 ]]; then
-    APP_PORT_START="$BASE_APP_PORT"
-  elif [[ -n "$HTTP_PORT" ]]; then
-    APP_PORT_START="$HTTP_PORT"
-  else
-    APP_PORT_START="$DEFAULT_MONOLITH_PORT"
-  fi
-  BASE_PORT_RESULT="$(find_available_ports "$APP_PORT_START" "${#SVC_NAMES[@]}")"
-  report_skipped_ports <<<"$BASE_PORT_RESULT"
-  mapfile -t APP_PORTS < <(printf '%s' "$BASE_PORT_RESULT" | read_selected_ports)
+  APP_PORT_START="$DEFAULT_MONOLITH_PORT"
 fi
+BASE_PORT_RESULT="$(find_available_ports "$APP_PORT_START" "${#SVC_NAMES[@]}")"
+report_skipped_ports <<<"$BASE_PORT_RESULT"
+mapfile -t APP_PORTS < <(printf '%s' "$BASE_PORT_RESULT" | read_selected_ports)
 
 CURRENT_APP_PORT=0
 for svc_name in "${SVC_NAMES[@]}"; do
@@ -1053,6 +1176,7 @@ for svc_name in "${SVC_NAMES[@]}"; do
   SVC_RUNTIME_NAMES["$svc_name"]="$svc_language"
   SVC_RUNTIME_VERSIONS["$svc_name"]="$svc_runtime_version"
   SVC_CONTAINER_PORTS["$svc_name"]="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["container_port"])' "$svc_path/.ladock-runtime.json")"
+  SVC_CUSTOM_DOCKERFILES["$svc_name"]="$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["custom_dockerfile"]).lower())' "$svc_path/.ladock-runtime.json")"
   if [[ "$svc_language" == "PHP" ]]; then
     php_ver="$svc_runtime_version"
   else
@@ -1060,7 +1184,7 @@ for svc_name in "${SVC_NAMES[@]}"; do
   fi
   SVC_PHP_VERSIONS["$svc_name"]="$php_ver"
 
-  SVC_COMPOSER_VERSIONS["$svc_name"]=2
+  SVC_COMPOSER_VERSIONS["$svc_name"]="$(python3 "$SCRIPTS_DIR/select_composer_version.py" "$php_ver")"
 done
 
 hr
@@ -1068,17 +1192,10 @@ echo " Mode         : MICROSERVICE"
 echo " Project Root : $PROJECT_PATH"
 echo " Source Root  : $SOURCE_PROJECT_PATH"
 echo " Project Name : $PROJECT_NAME"
-if [[ $USE_GATEWAY -eq 1 ]]; then
-  echo " Gateway Port : $GATEWAY_PORT"
-fi
 echo " MySQL Host Port : $DEFAULT_DB_PORT (internal 3306)"
 echo " Services     : ${#SVC_NAMES[@]}"
 for svc_name in "${SVC_NAMES[@]}"; do
-  if [[ $USE_GATEWAY -eq 1 ]]; then
-    echo "   [$svc_name] ${SVC_RUNTIME_NAMES[$svc_name]} ${SVC_RUNTIME_VERSIONS[$svc_name]} | internal :${SVC_CONTAINER_PORTS[$svc_name]} | direct :${SVC_HTTP_PORTS[$svc_name]} | route /${SVC_ROUTE_NAMES[$svc_name]}/"
-  else
-    echo "   [$svc_name] ${SVC_RUNTIME_NAMES[$svc_name]} ${SVC_RUNTIME_VERSIONS[$svc_name]} | internal :${SVC_CONTAINER_PORTS[$svc_name]} | direct :${SVC_HTTP_PORTS[$svc_name]}"
-  fi
+  echo "   [$svc_name] ${SVC_RUNTIME_NAMES[$svc_name]} ${SVC_RUNTIME_VERSIONS[$svc_name]} | internal :${SVC_CONTAINER_PORTS[$svc_name]} | direct :${SVC_HTTP_PORTS[$svc_name]}"
 done
 hr
 
@@ -1086,10 +1203,7 @@ mkdir -p "$PROJECT_PATH/logs"
 DOCKER_DIR="$PROJECT_PATH/.docker"
 CREDS_DIR="$DOCKER_DIR/credentials"
 mkdir -p "$DOCKER_DIR" "$CREDS_DIR"
-if [[ $USE_GATEWAY -eq 1 ]]; then
-  GATEWAY_DIR="$DOCKER_DIR/gateway"
-  mkdir -p "$GATEWAY_DIR"
-fi
+ladock_progress 55 "Menyiapkan database dan kredensial"
 
 for svc_name in "${SVC_NAMES[@]}"; do
   svc_path="${SVC_PATHS[$svc_name]}"
@@ -1204,6 +1318,7 @@ CONTAINER_PORTS_ARG=""
 PHP_VERS_ARG=""
 COMP_VERS_ARG=""
 SVC_ROUTES_ARG=""
+SVC_DOMAINS_ARG=""
 SVC_PATHS_ARG=""
 for svc_name in "${SVC_NAMES[@]}"; do
   [[ -n "$SERVICES_ARG" ]] && SERVICES_ARG+=","
@@ -1221,12 +1336,18 @@ for svc_name in "${SVC_NAMES[@]}"; do
   [[ -n "$SVC_ROUTES_ARG" ]] && SVC_ROUTES_ARG+=","
   SVC_ROUTES_ARG+="${svc_name}:${SVC_ROUTE_NAMES[$svc_name]}"
 
+  if [[ -n "${SVC_DOMAINS[$svc_name]:-}" ]]; then
+    [[ -n "$SVC_DOMAINS_ARG" ]] && SVC_DOMAINS_ARG+=","
+    SVC_DOMAINS_ARG+="${svc_name}:${SVC_DOMAINS[$svc_name]}"
+  fi
+
   [[ -n "${SVC_PATHS_ARG:-}" ]] && SVC_PATHS_ARG+=","
   SVC_PATHS_ARG+="${svc_name}:${SVC_PATHS[$svc_name]}"
 done
 
 cp "$TEMPLATE_DIR/Dockerfile" "$DOCKER_DIR/Dockerfile"
 [[ -f "$TEMPLATE_DIR/.dockerignore" ]] && cp "$TEMPLATE_DIR/.dockerignore" "$PROJECT_PATH/.dockerignore"
+ladock_progress 65 "Menyiapkan konfigurasi runtime"
 
 # ── Konfigurasi Environment & Adaptasi Legacy per-Service ─────────────────────
 for svc_name in "${SVC_NAMES[@]}"; do
@@ -1239,12 +1360,7 @@ for svc_name in "${SVC_NAMES[@]}"; do
   set_clean_env "$svc_path/.env" DB_DATABASE "${SVC_DB_NAMES[$svc_name]}"
   set_clean_env "$svc_path/.env" DB_USERNAME "${SVC_DB_USERS[$svc_name]}"
   set_clean_env "$svc_path/.env" DB_PASSWORD "${SVC_DB_PASSES[$svc_name]}"
-  route_name="${SVC_ROUTE_NAMES[$svc_name]}"
-  if [[ $USE_GATEWAY -eq 1 ]]; then
-    set_clean_env "$svc_path/.env" APP_URL "http://localhost:${GATEWAY_PORT}/${route_name}"
-  else
-    set_clean_env "$svc_path/.env" APP_URL "http://localhost:${SVC_HTTP_PORTS[$svc_name]}"
-  fi
+  set_clean_env "$svc_path/.env" APP_URL "http://localhost:${SVC_HTTP_PORTS[$svc_name]}"
 
   if [[ -f "$svc_path/wp-config.php" ]]; then
     python3 "$SCRIPTS_DIR/update_wordpress_config.py" "$svc_path/wp-config.php"
@@ -1313,19 +1429,6 @@ sed -e "s/__PROJECT__/$PROJECT_NAME/g" \
     -e 's|__DOCUMENT_ROOT__|/var/www|g' \
     "$TEMPLATE_DIR/apache-vhost.conf.tpl" > "$DOCKER_DIR/apache-vhost.conf"
 
-if [[ $USE_GATEWAY -eq 1 ]]; then
-  GATEWAY_CONF_RAW="$(python3 "$SCRIPTS_DIR/generate_gateway_conf.py" \
-    --project "$PROJECT_NAME" \
-    --services "$SERVICES_ARG" \
-    --routes "$SVC_ROUTES_ARG" \
-    --container-ports "$CONTAINER_PORTS_ARG" \
-    --gateway-port "$GATEWAY_PORT")"
-
-  echo "$GATEWAY_CONF_RAW" > "$DOCKER_DIR/apache-gateway.conf"
-  cp "$TEMPLATE_DIR/gateway.Dockerfile" "$GATEWAY_DIR/Dockerfile"
-  cp "$TEMPLATE_DIR/gateway-httpd.conf" "$GATEWAY_DIR/httpd.conf"
-fi
-
 log "Men-generate docker-compose-app.yml yang terhubung ke MySQL sentral..."
 GENERATE_COMPOSE_ARGS=(
   --project           "$PROJECT_NAME"
@@ -1338,15 +1441,12 @@ GENERATE_COMPOSE_ARGS=(
   --composer-versions "$COMP_VERS_ARG"
   --vhost-dir         "$DOCKER_DIR/vhosts"
   --output-dir        "$PROJECT_PATH"
+  --no-gateway
 )
-if [[ $USE_GATEWAY -eq 1 ]]; then
-  GENERATE_COMPOSE_ARGS+=(--gateway-port "$GATEWAY_PORT")
-else
-  GENERATE_COMPOSE_ARGS+=(--no-gateway)
-fi
 python3 "$SCRIPTS_DIR/generate_compose.py" "${GENERATE_COMPOSE_ARGS[@]}"
 
 log "Menjalankan stack microservices..."
+ladock_progress 80 "Membangun dan menjalankan container"
 cd "$PROJECT_PATH"
 $DC -f "$COMPOSE_DB_FILE" -p "${PROJECT_NAME}_db_stack" down --remove-orphans >/dev/null 2>&1 || true
 
@@ -1355,14 +1455,20 @@ if [[ -f "$COMPOSE_DB_FILE" ]]; then
 fi
 
 $DC -f "$COMPOSE_APP_FILE" -p "${PROJECT_NAME}_app_stack" up -d --build --remove-orphans
+for svc_name in "${SVC_NAMES[@]}"; do
+  if [[ "${SVC_RUNTIME_NAMES[$svc_name]}" == "PHP" && "${SVC_CUSTOM_DOCKERFILES[$svc_name]}" != "true" ]]; then
+    verify_php_db_connection \
+      "$COMPOSE_APP_FILE" \
+      "${PROJECT_NAME}_app_stack" \
+      "app_${svc_name}" \
+      "$svc_name"
+  fi
+done
 
 hr
-if [[ $USE_GATEWAY -eq 1 ]]; then
-  echo " ✓ MICROSERVICES LIVE — http://localhost:${GATEWAY_PORT}/"
-else
-  echo " ✓ SERVICES LIVE (Direct Access):"
-  for svc_name in "${SVC_NAMES[@]}"; do
-    echo "   • $svc_name : http://localhost:${SVC_HTTP_PORTS[$svc_name]}/"
-  done
-fi
+ladock_progress 100 "Deployment selesai"
+echo " ✓ SERVICES LIVE (Direct Access):"
+for svc_name in "${SVC_NAMES[@]}"; do
+  echo "   • $svc_name : http://localhost:${SVC_HTTP_PORTS[$svc_name]}/"
+done
 hr

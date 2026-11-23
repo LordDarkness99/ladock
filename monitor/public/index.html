@@ -266,6 +266,15 @@
               </div>
               <button class="btn-sm btn-ghost" onclick="clearDeployLogs()">Bersihkan</button>
             </div>
+            <div class="deploy-progress" id="deploy-progress" hidden>
+              <div class="deploy-progress-row">
+                <strong id="deploy-progress-label">Menyiapkan deployment...</strong>
+                <span id="deploy-progress-value">0%</span>
+              </div>
+              <div class="deploy-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <div class="deploy-progress-fill" id="deploy-progress-fill"></div>
+              </div>
+            </div>
             <pre class="terminal-window" id="deploy-live-terminal">Menunggu eksekusi deployment...</pre>
           </div>
         </div>
