@@ -33,10 +33,24 @@ def prepare_dump_sql(content: str, db_name: str) -> str:
         re.IGNORECASE,
     )
     lines = [line for line in content.splitlines() if not database_directive.fullmatch(line)]
+    sql = "\n".join(lines)
+    # Bersihkan DEFINER cPanel pada view / stored routine agar bisa diakses container tanpa batasan user lama
+    sql = re.sub(
+        r"/\*!\d+\s*DEFINER\s*=\s*[^*]+?(?:SQL\s+SECURITY\s+(?:DEFINER|INVOKER))?\s*\*/",
+        "/*!50013 SQL SECURITY INVOKER */",
+        sql,
+        flags=re.IGNORECASE,
+    )
+    sql = re.sub(
+        r"\bDEFINER\s*=\s*(?:`[^`]+`|'[^']+'|[^\s@]+)@(?:`[^`]+`|'[^']+'|[^\s]+)",
+        "",
+        sql,
+        flags=re.IGNORECASE,
+    )
     return (
         f"USE `{db_name}`;\n"
         "SET FOREIGN_KEY_CHECKS=0;\n"
-        + "\n".join(lines)
+        + sql
         + "\nSET FOREIGN_KEY_CHECKS=1;\n"
     )
 

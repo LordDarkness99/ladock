@@ -69,6 +69,33 @@ def test_codeigniter_base_url_uses_gateway_path(tmp_path: Path):
     assert "getenv('APP_URL')" in config.read_text(encoding="utf-8")
 
 
+def test_codeigniter3_array_syntax_is_adapted(tmp_path: Path):
+    service_dir = tmp_path / "ci3_app"
+    config_dir = service_dir / "application/config"
+    config_dir.mkdir(parents=True)
+    database_config = config_dir / "database.php"
+    database_config.write_text(
+        "<?php\n"
+        "$db['default'] = array(\n"
+        "    'dsn'      => '',\n"
+        "    'hostname' => '192.168.1.25',\n"
+        "    'username' => 'rspmangu_rsparu',\n"
+        "    'password' => 'kominfo2017$',\n"
+        "    'database' => 'rspmangu_dbrsparu',\n"
+        "    'dbdriver' => 'mysqli',\n"
+        ");\n",
+        encoding="utf-8",
+    )
+    assert get_legacy_database_name(service_dir) == "rspmangu_dbrsparu"
+    assert update_codeigniter_config(service_dir)
+    updated = database_config.read_text(encoding="utf-8")
+    assert "getenv('DB_HOST')" in updated
+    assert "getenv('DB_USERNAME')" in updated
+    assert "getenv('DB_PASSWORD')" in updated
+    assert "getenv('DB_DATABASE')" in updated
+    assert "192.168.1.25" not in updated
+
+
 def test_symfony1_database_name_and_credentials_are_updated(tmp_path: Path):
     service_dir = tmp_path / "surveylance"
     config_dir = service_dir / "config"

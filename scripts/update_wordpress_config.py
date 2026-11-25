@@ -128,18 +128,29 @@ def update_wordpress_config(config_path: Path) -> int:
 
     if "// LaDock path-prefix support for reverse-proxy deployments." not in updated:
         settings_require = re.search(
-            r"^\s*require_once\s*\(\s*ABSPATH\s*\.\s*['\"]wp-settings\.php['\"]\s*\)\s*;",
+            r"^\s*require(?:_once)?\s*(?:\(\s*|\s+).*?wp-settings\.php.*?;",
             updated,
             re.MULTILINE,
         )
-        if not settings_require:
-            raise ValueError("Titik bootstrap wp-settings.php tidak ditemukan.")
-        updated = (
-            updated[: settings_require.start()]
-            + PATH_PREFIX_BOOTSTRAP
-            + "\n"
-            + updated[settings_require.start() :]
-        )
+        if settings_require:
+            updated = (
+                updated[: settings_require.start()]
+                + PATH_PREFIX_BOOTSTRAP
+                + "\n"
+                + updated[settings_require.start() :]
+            )
+        else:
+            closing_tag = re.search(r"\?>\s*$", updated)
+            if closing_tag:
+                updated = (
+                    updated[: closing_tag.start()]
+                    + "\n"
+                    + PATH_PREFIX_BOOTSTRAP
+                    + "\n"
+                    + updated[closing_tag.start() :]
+                )
+            else:
+                updated = updated + "\n" + PATH_PREFIX_BOOTSTRAP + "\n"
         changed += 1
 
     changed += _normalize_wordpress_rewrite_paths(config_path)

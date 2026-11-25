@@ -13,13 +13,29 @@
 
 set -euo pipefail
 exec 3>&1
-trap 'status=$?; trap - ERR; message="❌ [DEPLOY ERROR] Terjadi kegagalan pada baris $LINENO!"; printf "%s\n" "$message" >&2; printf "%s Periksa log: %s\n" "$message" "${DEPLOY_LOG_FILE:-log deployment}" >&3; exit "$status"' ERR
+trap 'status=$?; trap - ERR; message="❌ [DEPLOY ERROR] Terjadi kegagalan pada baris $LINENO!"; printf "\n%s\n" "$message" >&2; printf "\n%s Periksa log: %s\n" "$message" "${DEPLOY_LOG_FILE:-log deployment}" >&3; exit "$status"' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE_DIR="$SCRIPT_DIR/templates"
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 CONFIG_FILE="$SCRIPT_DIR/config.json"
 CENTRAL_ENV_FILE="$SCRIPT_DIR/.ladock_db.env"
+
+# Konfigurasi folder temporer di disk lokal proyek (mencegah kehabisan memori /tmp tmpfs)
+LADOCK_TEMP_DIR="$SCRIPT_DIR/.tmp"
+mkdir -p "$LADOCK_TEMP_DIR"
+export TMPDIR="$LADOCK_TEMP_DIR"
+export LADOCK_TMP_DIR="$LADOCK_TEMP_DIR"
+rm -rf "$LADOCK_TEMP_DIR"/ladock_extract_* /tmp/ladock_extract_* 2>/dev/null || true
+
+cleanup_deployment() {
+  local exit_code=$?
+  if [[ -n "${LADOCK_TEMP_DIR:-}" && -d "$LADOCK_TEMP_DIR" ]]; then
+    rm -rf "$LADOCK_TEMP_DIR"/ladock_extract_* 2>/dev/null || true
+  fi
+  exit "$exit_code"
+}
+trap cleanup_deployment EXIT
 
 if [[ -f "$CENTRAL_ENV_FILE" ]]; then
   # shellcheck disable=SC1090
@@ -897,7 +913,9 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
     CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
     CREATE USER IF NOT EXISTS '${SQL_DB_USER}'@'%' IDENTIFIED BY '${SQL_DB_PASS}';
     ALTER USER '${SQL_DB_USER}'@'%' IDENTIFIED BY '${SQL_DB_PASS}';
-    GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'%';
+    GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${SQL_DB_USER}'@'%';
+    CREATE USER IF NOT EXISTS '${PROJECT_NAME}'@'localhost';
+    GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${PROJECT_NAME}'@'localhost';
     FLUSH PRIVILEGES;
   " >/dev/null 2>&1
 
@@ -955,9 +973,27 @@ if [[ "$DEPLOY_MODE" == "monolith" ]]; then
       if ! composer install --no-interaction --prefer-dist --optimize-autoloader 2>&1 | tee /tmp/composer_output; then
         if grep -q 'does not satisfy' /tmp/composer_output; then
           echo '⚠️  Dependencies tidak kompatibel, menjalankan composer update...'
-          composer update --no-interaction --prefer-dist --optimize-autoloader
+          composer update --no-interaction --prefer-dist --optimize-autoloader || \
+            composer update --no-interaction --prefer-dist --optimize-autoloader --ignore-platform-reqs
+        elif grep -Fq 'composer.lock was generated before the allow-plugins security feature' /tmp/composer_output; then
+          echo '⚠️  Lockfile Composer lama terdeteksi; memeriksa plugin legacy yang dikenal...'
+          if ! grep -Fq '\"name\": \"composer/package-versions-deprecated\"' composer.lock; then
+            echo 'Plugin legacy composer/package-versions-deprecated tidak ditemukan di composer.lock; tidak ada plugin yang diizinkan otomatis.' >&2
+            exit 1
+          fi
+          composer config --no-plugins allow-plugins.composer/package-versions-deprecated true
+          composer update --lock --no-install --no-scripts --no-plugins --no-interaction --ignore-platform-reqs
+          if ! composer install --no-interaction --prefer-dist --optimize-autoloader; then
+            echo '⚠️  Composer install memerlukan kompatibilitas platform tambahan, mencoba dengan --ignore-platform-reqs...'
+            composer install --no-interaction --prefer-dist --optimize-autoloader --ignore-platform-reqs
+          fi
+        elif grep -Eqi '(requires ext-|missing from your system|does not contain a compatible set of packages)' /tmp/composer_output; then
+          echo '⚠️  Platform requirements tidak terpenuhi sepenuhnya, mencoba dengan --ignore-platform-reqs...'
+          composer install --no-interaction --prefer-dist --optimize-autoloader --ignore-platform-reqs || \
+            composer update --no-interaction --prefer-dist --optimize-autoloader --ignore-platform-reqs
         else
-          exit 1
+          echo '⚠️  Composer install standar gagal, mencoba fallback dengan --ignore-platform-reqs...'
+          composer install --no-interaction --prefer-dist --optimize-autoloader --ignore-platform-reqs || exit 1
         fi
       fi
     fi
@@ -1286,6 +1322,8 @@ for svc_name in "${SVC_NAMES[@]}"; do
     CREATE USER IF NOT EXISTS '${SQL_DB_USER}'@'%' IDENTIFIED BY '${SQL_DB_PASS}';
     ALTER USER '${SQL_DB_USER}'@'%' IDENTIFIED BY '${SQL_DB_PASS}';
     GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${SQL_DB_USER}'@'%';
+    CREATE USER IF NOT EXISTS '${PROJECT_NAME}'@'localhost';
+    GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${PROJECT_NAME}'@'localhost';
     FLUSH PRIVILEGES;
   " >/dev/null
   legacy_db_name="${SVC_LEGACY_DB_NAMES[$svc_name]:-}"

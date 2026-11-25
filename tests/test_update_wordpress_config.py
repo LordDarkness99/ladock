@@ -89,3 +89,36 @@ def test_legacy_wordpress_query_comparison_is_safe_on_php8(tmp_path):
         "if ( ! is_scalar( $qv['p'] ) || ( '' !== $qv['p'] && $qv['p'] < 0 ) ) {\n"
     )
     assert update_wordpress_config(config) == 0
+
+
+def test_wordpress_config_with_unparenthesized_require_once(tmp_path):
+    config = tmp_path / "wp-config.php"
+    config.write_text(
+        "<?php\n"
+        "define( 'DB_NAME', 'test_db' );\n"
+        "$table_prefix = 'wp_';\n"
+        "require_once ABSPATH . 'wp-settings.php';\n",
+        encoding="utf-8",
+    )
+
+    changed = update_wordpress_config(config)
+    assert changed >= 4
+    updated = config.read_text(encoding="utf-8")
+    assert "define('DB_NAME', getenv('DB_DATABASE'))" in updated
+    assert "// LaDock path-prefix support for reverse-proxy deployments." in updated
+    assert updated.index("// LaDock path-prefix support") < updated.index("require_once ABSPATH . 'wp-settings.php'")
+
+
+def test_wordpress_config_fallback_when_wp_settings_missing(tmp_path):
+    config = tmp_path / "wp-config.php"
+    config.write_text(
+        "<?php\n"
+        "define( 'DB_NAME', 'test_db' );\n"
+        "$table_prefix = 'wp_';\n",
+        encoding="utf-8",
+    )
+
+    changed = update_wordpress_config(config)
+    assert changed >= 4
+    updated = config.read_text(encoding="utf-8")
+    assert "// LaDock path-prefix support for reverse-proxy deployments." in updated

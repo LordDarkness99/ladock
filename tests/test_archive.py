@@ -19,7 +19,14 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.extract_archive import validate_and_extract_zip, is_safe_path, fix_split_laravel_paths
+from scripts.extract_archive import (
+    validate_and_extract_zip,
+    validate_and_extract_tar,
+    is_safe_path,
+    fix_split_laravel_paths,
+    should_skip_archive_entry,
+    handle_oversized_log,
+)
 
 
 class TestArchiveExtraction(unittest.TestCase):
@@ -113,6 +120,28 @@ class TestArchiveExtraction(unittest.TestCase):
             new_paths = f.read()
         self.assertIn("'public' => __DIR__.'/../public'", new_paths)
         self.assertNotIn("public_html", new_paths)
+
+    def test_should_skip_archive_entry(self):
+        self.assertTrue(should_skip_archive_entry("cpmove-demo/homedir/.trash/test.txt"))
+        self.assertTrue(should_skip_archive_entry("homedir/tmp/awstats/awstats.conf"))
+        self.assertTrue(should_skip_archive_entry("homedir/tmp/pma_template_compiles/123.php"))
+        self.assertTrue(should_skip_archive_entry("cpmove-demo/homedir/mail/user/cur/123"))
+        self.assertTrue(should_skip_archive_entry("logs/site.com-ssl_log"))
+        self.assertFalse(should_skip_archive_entry("homedir/public_html/index.php"))
+        self.assertFalse(should_skip_archive_entry("homedir/laravel/app/User.php"))
+        self.assertFalse(should_skip_archive_entry("mysql/dump.sql"))
+
+    def test_handle_oversized_log(self):
+        target = os.path.join(self.test_dir, "storage/logs/laravel.log")
+        handled = handle_oversized_log("laravel.log", 20 * 1024 * 1024, target)
+        self.assertTrue(handled)
+        self.assertTrue(os.path.isfile(target))
+        self.assertLess(os.path.getsize(target), 1024)
+
+        normal_target = os.path.join(self.test_dir, "storage/logs/small.log")
+        handled_small = handle_oversized_log("small.log", 1024, normal_target)
+        self.assertFalse(handled_small)
+        self.assertFalse(os.path.isfile(normal_target))
 
 
 if __name__ == "__main__":

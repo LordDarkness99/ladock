@@ -23,9 +23,10 @@ RUN (sed -i 's|http://deb.debian.org/debian-security|http://archive.debian.org/d
       git curl zip unzip \
       libpng-dev libxml2-dev libzip-dev libicu-dev libmcrypt-dev || true) \
  && (apt-get install -y --no-install-recommends --allow-unauthenticated libonig-dev || true) \
- && (docker-php-ext-install pdo_mysql mysqli mbstring exif pcntl bcmath gd zip intl mcrypt || \
-     docker-php-ext-install pdo_mysql mysqli mbstring mcrypt || \
+ && (docker-php-ext-install pdo_mysql mysqli mbstring exif pcntl bcmath gd zip intl || \
+     docker-php-ext-install pdo_mysql mysqli mbstring gd zip || \
      docker-php-ext-install pdo_mysql mysqli || true) \
+ && (docker-php-ext-install mcrypt || (pecl install mcrypt && docker-php-ext-enable mcrypt) || true) \
  && a2enmod rewrite headers \
  && echo "ServerName localhost" >> /etc/apache2/apache2.conf \
  && apt-get clean && rm -rf /var/lib/apt/lists/*

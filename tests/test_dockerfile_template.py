@@ -11,6 +11,7 @@ def test_php_image_includes_mysqli_and_relies_on_compose_source_mounts():
     )
 
     assert "RUN docker-php-ext-install mysqli" in dockerfile
+    assert "gd zip" in dockerfile
     assert "COPY src/" not in dockerfile
     assert "./src:/var/www" in monolith_compose
     assert "__CENTRAL_DB_NETWORK__" in monolith_compose

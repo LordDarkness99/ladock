@@ -15,6 +15,7 @@ mysql/db/*/*.sql
 
 # Uploads & temporary archives
 uploads/
+.tmp/
 *.tar.gz
 *.zip
 *.tar

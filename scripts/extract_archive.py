@@ -65,6 +65,50 @@ def is_safe_path(base_dir: str, target_path: str) -> bool:
     return os.path.commonpath([base]) == os.path.commonpath([base, target])
 
 
+MAX_LOG_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
+def should_skip_archive_entry(name: str) -> bool:
+    """Deteksi entri cPanel yang tidak relevan untuk deploy web dan sering memakan disk besar."""
+    normalized = name.replace("\\", "/").strip("/")
+    parts = normalized.split("/")
+    # Lewati folder trash cPanel
+    if any(p == ".trash" for p in parts):
+        return True
+    # Lewati tmp internal cPanel (awstats, webalizer, cache compile pma, dll.)
+    if "tmp" in parts:
+        tmp_idx = parts.index("tmp")
+        if tmp_idx + 1 < len(parts) and parts[tmp_idx + 1] in (
+            "awstats",
+            "webalizer",
+            "analog",
+            "pma_template_compiles",
+        ):
+            return True
+        if any(p.startswith("pma_template_compiles") for p in parts):
+            return True
+    # Lewati folder mail cPanel (bukan bagian aplikasi web)
+    if any(p == "mail" for p in parts):
+        return True
+    # Lewati raw access/ssl logs server
+    if len(parts) >= 2 and parts[-2] == "logs" and (
+        parts[-1].endswith("-ssl_log") or parts[-1].endswith("-access_log")
+    ):
+        return True
+    return False
+
+
+def handle_oversized_log(name: str, size: int, target_path: str) -> bool:
+    """Jika file log terlalu besar (>10MB), pangkas agar tidak menghabiskan kuota disk."""
+    if name.lower().endswith(".log") and size > MAX_LOG_FILE_SIZE:
+        log(f"⚠️  File log raksasa dipangkas ({size / (1024 * 1024):.1f} MB): {name}")
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write("# Log dipangkas oleh LaDock saat ekstraksi arsip karena melebihi batas 10MB\n")
+        return True
+    return False
+
+
 def validate_and_extract_zip(archive_path: str, dest_dir: str) -> None:
     """Validasi corrupt & ekstrak file ZIP dengan proteksi path traversal."""
     if not zipfile.is_zipfile(archive_path):
@@ -77,10 +121,15 @@ def validate_and_extract_zip(archive_path: str, dest_dir: str) -> None:
             raise ValueError(f"Arsip ZIP korup terdeteksi pada entri: {corrupt_file}")
 
         for member in zf.infolist():
+            if should_skip_archive_entry(member.filename):
+                continue
             # Mencegah path traversal
             target_path = os.path.join(dest_dir, member.filename)
             if not is_safe_path(dest_dir, target_path):
                 log(f"⚠️  PERINGATAN: Melewati entri berisiko path traversal: {member.filename}")
+                continue
+
+            if handle_oversized_log(member.filename, member.file_size, target_path):
                 continue
 
             # Abaikan entri symlink berbahaya
@@ -94,6 +143,8 @@ def validate_and_extract_tar(archive_path: str, dest_dir: str) -> None:
 
     with tarfile.open(archive_path, 'r:*') as tar:
         for member in tar.getmembers():
+            if should_skip_archive_entry(member.name):
+                continue
             target_path = os.path.join(dest_dir, member.name)
             if not is_safe_path(dest_dir, target_path):
                 log(f"⚠️  PERINGATAN: Melewati entri TAR path traversal: {member.name}")
@@ -103,6 +154,9 @@ def validate_and_extract_tar(archive_path: str, dest_dir: str) -> None:
                 if os.path.isabs(member.linkname) or not is_safe_path(dest_dir, os.path.join(os.path.dirname(target_path), member.linkname)):
                     log(f"⚠️  Melewati symlink absolut/eksternal cPanel: {member.name} -> {member.linkname}")
                     continue
+
+            if handle_oversized_log(member.name, member.size, target_path):
+                continue
 
             try:
                 try:
@@ -404,158 +458,163 @@ def main():
 
     db_output_dir = os.path.abspath(sys.argv[3]) if len(sys.argv) >= 4 and sys.argv[3] else None
 
-    tmp_dir = tempfile.mkdtemp(prefix="ladock_extract_")
+    temp_dir_base = os.environ.get("LADOCK_TMP_DIR") or os.environ.get("TMPDIR")
+    if not temp_dir_base and output_dir:
+        parent_out = os.path.dirname(os.path.abspath(output_dir))
+        if os.path.isdir(parent_out):
+            temp_dir_base = parent_out
+    tmp_dir = tempfile.mkdtemp(prefix="ladock_extract_", dir=temp_dir_base)
     log(f"-> Ekstraksi arsip ke folder sementara: {tmp_dir}")
 
-    lower_name = archive_path.lower()
     try:
-        if lower_name.endswith(".zip"):
-            validate_and_extract_zip(archive_path, tmp_dir)
-        elif any(lower_name.endswith(ext) for ext in [".tar.gz", ".tgz", ".tar", ".tar.bz2"]):
-            validate_and_extract_tar(archive_path, tmp_dir)
-        else:
-            # Coba zip dulu, fallback ke tar
-            try:
+        lower_name = archive_path.lower()
+        try:
+            if lower_name.endswith(".zip"):
                 validate_and_extract_zip(archive_path, tmp_dir)
-            except Exception:
+            elif any(lower_name.endswith(ext) for ext in [".tar.gz", ".tgz", ".tar", ".tar.bz2"]):
                 validate_and_extract_tar(archive_path, tmp_dir)
-    except Exception as e:
-        log(f"❌ Gagal mengekstrak arsip: {e}")
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        sys.exit(1)
+            else:
+                # Coba zip dulu, fallback ke tar
+                try:
+                    validate_and_extract_zip(archive_path, tmp_dir)
+                except Exception:
+                    validate_and_extract_tar(archive_path, tmp_dir)
+        except Exception as e:
+            log(f"❌ Gagal mengekstrak arsip: {e}")
+            sys.exit(1)
 
-    # Cek apakah arsip merupakan format cPanel (memiliki folder homedir)
-    homedir = find_dir_named(tmp_dir, "homedir")
-    is_cpanel = homedir is not None
+        # Cek apakah arsip merupakan format cPanel (memiliki folder homedir)
+        homedir = find_dir_named(tmp_dir, "homedir")
+        is_cpanel = homedir is not None
 
-    cpanel_multi_app_plan = find_cpanel_multi_app_plan(homedir) if is_cpanel else None
-    if is_cpanel:
-        log("-> Terdeteksi arsip cPanel (memiliki 'homedir').")
-        cpanel_pub = os.path.join(homedir, "public_html")
-        if not os.path.isdir(cpanel_pub):
-            cpanel_pub = os.path.join(homedir, "www")
+        cpanel_multi_app_plan = find_cpanel_multi_app_plan(homedir) if is_cpanel else None
+        if is_cpanel:
+            log("-> Terdeteksi arsip cPanel (memiliki 'homedir').")
+            cpanel_pub = os.path.join(homedir, "public_html")
+            if not os.path.isdir(cpanel_pub):
+                cpanel_pub = os.path.join(homedir, "www")
 
-        if cpanel_multi_app_plan:
-            app_root = cpanel_multi_app_plan["web_root"]
+            if cpanel_multi_app_plan:
+                app_root = cpanel_multi_app_plan["web_root"]
+            else:
+                # Di cPanel, fokus utama adalah public_html
+                # Hanya gunakan split Laravel jika benar-benar ada Laravel root terpisah di luar public_html
+                laravel_root = find_laravel_root(homedir)
+                if laravel_root and detect_split_public(laravel_root, homedir):
+                    app_root = laravel_root
+                elif os.path.isdir(cpanel_pub):
+                    app_root = cpanel_pub
+                else:
+                    app_root = laravel_root or find_general_app_root(homedir)
         else:
-            # Di cPanel, fokus utama adalah public_html
-            # Hanya gunakan split Laravel jika benar-benar ada Laravel root terpisah di luar public_html
-            laravel_root = find_laravel_root(homedir)
-            if laravel_root and detect_split_public(laravel_root, homedir):
-                app_root = laravel_root
-            elif os.path.isdir(cpanel_pub):
-                app_root = cpanel_pub
-            else:
-                app_root = laravel_root or find_general_app_root(homedir)
-    else:
-        app_root = find_laravel_root(tmp_dir) or find_general_app_root(tmp_dir)
+            app_root = find_laravel_root(tmp_dir) or find_general_app_root(tmp_dir)
 
-    if not app_root or not os.path.isdir(app_root):
-        log("❌ Tidak ditemukan source code aplikasi yang valid di dalam arsip.")
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        sys.exit(1)
+        if not app_root or not os.path.isdir(app_root):
+            log("❌ Tidak ditemukan source code aplikasi yang valid di dalam arsip.")
+            sys.exit(1)
 
-    log(f"-> Source code aplikasi ditemukan di: {app_root}")
+        log(f"-> Source code aplikasi ditemukan di: {app_root}")
 
-    # Salin ke folder output
-    if os.path.exists(output_dir):
-        shutil.rmtree(output_dir)
-    os.makedirs(os.path.dirname(output_dir), exist_ok=True)
-    if cpanel_multi_app_plan:
-        extract_cpanel_multi_apps(cpanel_multi_app_plan, output_dir)
-        log(
-            f"-> {len(cpanel_multi_app_plan['sub_services']) + 1} aplikasi cPanel ditata di: "
-            f"{output_dir}/apps/"
-        )
-    else:
-        shutil.copytree(app_root, output_dir)
-    log(f"-> Aplikasi disalin ke: {output_dir}")
+        # Salin ke folder output
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
+        os.makedirs(os.path.dirname(output_dir), exist_ok=True)
+        if cpanel_multi_app_plan:
+            extract_cpanel_multi_apps(cpanel_multi_app_plan, output_dir)
+            log(
+                f"-> {len(cpanel_multi_app_plan['sub_services']) + 1} aplikasi cPanel ditata di: "
+                f"{output_dir}/apps/"
+            )
+        else:
+            shutil.copytree(app_root, output_dir)
+        log(f"-> Aplikasi disalin ke: {output_dir}")
 
-    # Simpan metadata cPanel jika ada untuk analisis service usage
-    if is_cpanel:
-        meta_dir = os.path.join(output_dir, ".cpanel_metadata")
-        userdata_dir = find_dir_named(tmp_dir, "userdata")
-        if userdata_dir and os.path.isdir(userdata_dir):
-            shutil.copytree(userdata_dir, os.path.join(meta_dir, "userdata"), dirs_exist_ok=True)
-            log("-> Metadata cPanel (userdata) disimpan ke .cpanel_metadata/")
-        bandwidth_dir = find_dir_named(tmp_dir, "bandwidth")
-        if bandwidth_dir and os.path.isdir(bandwidth_dir):
-            shutil.copytree(bandwidth_dir, os.path.join(meta_dir, "bandwidth"), dirs_exist_ok=True)
-        for root_scan, _, files_scan in os.walk(tmp_dir):
-            if "homedir" in root_scan and "public_html" in root_scan:
-                continue
-            for fn in files_scan:
-                if "bandwidth" in fn.lower():
-                    src_bw = os.path.join(root_scan, fn)
-                    dst_bw = os.path.join(meta_dir, fn)
-                    os.makedirs(meta_dir, exist_ok=True)
-                    if not os.path.exists(dst_bw):
-                        try:
-                            shutil.copy2(src_bw, dst_bw)
-                        except OSError:
-                            pass
-
-    # Jika cPanel, gabungkan split public_html jika ada
-    if is_cpanel and homedir and not cpanel_multi_app_plan:
-        output_public = os.path.join(output_dir, "public")
-        public_html = os.path.join(homedir, "public_html")
-        if not os.path.isdir(public_html):
-            alt_www = os.path.join(homedir, "www")
-            if os.path.isdir(alt_www) and not os.path.islink(alt_www):
-                public_html = alt_www
-
-        if os.path.isdir(public_html):
-            if not os.path.isdir(output_public):
-                log(f"-> Menggabungkan public_html terpisah ke {output_public}...")
-                shutil.copytree(public_html, output_public, symlinks=True)
-            else:
-                log(f"-> Menggabungkan file & folder aset tambahan dari public_html ke {output_public}...")
-                for root_dir, dirs, files in os.walk(public_html):
-                    rel = os.path.relpath(root_dir, public_html)
-                    target_dir = os.path.join(output_public, rel) if rel != "." else output_public
-                    os.makedirs(target_dir, exist_ok=True)
-                    for fn in files:
-                        src_f = os.path.join(root_dir, fn)
-                        dst_f = os.path.join(target_dir, fn)
-                        if not os.path.exists(dst_f) or os.path.getsize(dst_f) == 0:
+        # Simpan metadata cPanel jika ada untuk analisis service usage
+        if is_cpanel:
+            meta_dir = os.path.join(output_dir, ".cpanel_metadata")
+            userdata_dir = find_dir_named(tmp_dir, "userdata")
+            if userdata_dir and os.path.isdir(userdata_dir):
+                shutil.copytree(userdata_dir, os.path.join(meta_dir, "userdata"), dirs_exist_ok=True)
+                log("-> Metadata cPanel (userdata) disimpan ke .cpanel_metadata/")
+            bandwidth_dir = find_dir_named(tmp_dir, "bandwidth")
+            if bandwidth_dir and os.path.isdir(bandwidth_dir):
+                shutil.copytree(bandwidth_dir, os.path.join(meta_dir, "bandwidth"), dirs_exist_ok=True)
+            for root_scan, _, files_scan in os.walk(tmp_dir):
+                if "homedir" in root_scan and "public_html" in root_scan:
+                    continue
+                for fn in files_scan:
+                    if "bandwidth" in fn.lower():
+                        src_bw = os.path.join(root_scan, fn)
+                        dst_bw = os.path.join(meta_dir, fn)
+                        os.makedirs(meta_dir, exist_ok=True)
+                        if not os.path.exists(dst_bw):
                             try:
-                                shutil.copy2(src_f, dst_f)
+                                shutil.copy2(src_bw, dst_bw)
                             except OSError:
                                 pass
-            fix_split_laravel_paths(output_dir, os.path.basename(laravel_root) if laravel_root else None)
 
-    # Bersihkan cache Laravel jika ada
-    if not cpanel_multi_app_plan:
-        clean_laravel_cache(output_dir)
+        # Jika cPanel, gabungkan split public_html jika ada
+        if is_cpanel and homedir and not cpanel_multi_app_plan:
+            output_public = os.path.join(output_dir, "public")
+            public_html = os.path.join(homedir, "public_html")
+            if not os.path.isdir(public_html):
+                alt_www = os.path.join(homedir, "www")
+                if os.path.isdir(alt_www) and not os.path.islink(alt_www):
+                    public_html = alt_www
 
-    # Temukan dump SQL
-    dumps = find_db_dumps(tmp_dir)
-    if dumps:
-        log(f"-> Ditemukan {len(dumps)} file dump database (.sql).")
-        # Jika db_output_dir diberikan, salin dump ke mysql/db/<app_name>/
-        if db_output_dir:
-            os.makedirs(db_output_dir, exist_ok=True)
-            primary_dump = dumps[0]
-            dest_sql = os.path.join(db_output_dir, "data.sql")
-            shutil.copy2(primary_dump, dest_sql)
-            log(f"-> Dump SQL utama disalin ke: {dest_sql}")
-            for dump_file in dumps:
-                named_dest = os.path.join(db_output_dir, os.path.basename(dump_file))
-                if os.path.realpath(named_dest) != os.path.realpath(dump_file):
-                    shutil.copy2(dump_file, named_dest)
+            if os.path.isdir(public_html):
+                if not os.path.isdir(output_public):
+                    log(f"-> Menggabungkan public_html terpisah ke {output_public}...")
+                    shutil.copytree(public_html, output_public, symlinks=True)
+                else:
+                    log(f"-> Menggabungkan file & folder aset tambahan dari public_html ke {output_public}...")
+                    for root_dir, dirs, files in os.walk(public_html):
+                        rel = os.path.relpath(root_dir, public_html)
+                        target_dir = os.path.join(output_public, rel) if rel != "." else output_public
+                        os.makedirs(target_dir, exist_ok=True)
+                        for fn in files:
+                            src_f = os.path.join(root_dir, fn)
+                            dst_f = os.path.join(target_dir, fn)
+                            if not os.path.exists(dst_f) or os.path.getsize(dst_f) == 0:
+                                try:
+                                    shutil.copy2(src_f, dst_f)
+                                except OSError:
+                                    pass
+                fix_split_laravel_paths(output_dir, os.path.basename(laravel_root) if laravel_root else None)
+
+        # Bersihkan cache Laravel jika ada
+        if not cpanel_multi_app_plan:
+            clean_laravel_cache(output_dir)
+
+        # Temukan dump SQL
+        dumps = find_db_dumps(tmp_dir)
+        if dumps:
+            log(f"-> Ditemukan {len(dumps)} file dump database (.sql).")
+            # Jika db_output_dir diberikan, salin dump ke mysql/db/<app_name>/
+            if db_output_dir:
+                os.makedirs(db_output_dir, exist_ok=True)
+                primary_dump = dumps[0]
+                dest_sql = os.path.join(db_output_dir, "data.sql")
+                shutil.copy2(primary_dump, dest_sql)
+                log(f"-> Dump SQL utama disalin ke: {dest_sql}")
+                for dump_file in dumps:
+                    named_dest = os.path.join(db_output_dir, os.path.basename(dump_file))
+                    if os.path.realpath(named_dest) != os.path.realpath(dump_file):
+                        shutil.copy2(dump_file, named_dest)
+            else:
+                # Fallback: salin ke output_dir jika tidak ada db_output_dir spesifik
+                for dump_f in dumps[:2]:
+                    shutil.copy2(dump_f, os.path.join(output_dir, os.path.basename(dump_f)))
         else:
-            # Fallback: salin ke output_dir jika tidak ada db_output_dir spesifik
-            for dump_f in dumps[:2]:
-                shutil.copy2(dump_f, os.path.join(output_dir, os.path.basename(dump_f)))
-    else:
-        log("ℹ️  Tidak ditemukan file dump database (.sql).")
+            log("ℹ️  Tidak ditemukan file dump database (.sql).")
 
-    # Bersihkan folder temp
-    shutil.rmtree(tmp_dir, ignore_errors=True)
-    log("✓ Ekstraksi dan penataan selesai.")
+        log("✓ Ekstraksi dan penataan selesai.")
 
-    # Baris terakhir stdout adalah path folder aplikasi
-    print(output_dir)
+        # Baris terakhir stdout adalah path folder aplikasi
+        print(output_dir)
+    finally:
+        # Bersihkan folder temp
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
